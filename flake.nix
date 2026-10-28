@@ -127,6 +127,7 @@
               pkgs.cargo-deny
               pkgs.cargo-audit
               pkgs.bacon
+              pkgs.cmake
             ]
             ++ lib.optionals useMold [ pkgs.mold ];
 
