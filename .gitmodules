@@ -1,0 +1,3 @@
+[submodule "third_party/libjnivm"]
+	path = third_party/libjnivm
+	url = https://github.com/rurikoo/libjnivm.git
