@@ -2,5 +2,10 @@
 name = "usagi"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+
+[lib]
+doctest = false
+path = "src/lib.rs"
 
 [dependencies]
