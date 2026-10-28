@@ -8,4 +8,5 @@ license = "MIT"
 doctest = false
 path = "src/lib.rs"
 
-[dependencies]
+[build-dependencies]
+cmake = "0.1.58"
