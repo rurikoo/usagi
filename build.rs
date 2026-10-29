@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, path::PathBuf};
 
 fn env_flag(name: &str, default: bool) -> bool {
     println!("cargo:rerun-if-env-changed={name}");
@@ -16,58 +16,59 @@ fn main() {
     let manifest_dir =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set"));
 
-    let source_dir = manifest_dir.join("third_party/libjnivm");
+    let jnivm_dir = manifest_dir.join("third_party/libjnivm");
 
-    if !source_dir.join("CMakeLists.txt").is_file() {
-        panic!(
-            "libjnivm submodule is missing. Run: \
-             git submodule update --init --recursive"
-        );
+    for path in [
+        manifest_dir.join("CMakeLists.txt"),
+        manifest_dir.join("cpp/bridge.cpp"),
+        manifest_dir.join("include/usagi.h"),
+        jnivm_dir.join("CMakeLists.txt"),
+    ] {
+        if !path.is_file() {
+            panic!(
+                "required build file is missing: {}\n\
+                 check your repository and submodules",
+                path.display()
+            );
+        }
+
+        println!("cargo:rerun-if-changed={}", path.display());
     }
 
-    println!(
-        "cargo:rerun-if-changed={}",
-        source_dir.join("CMakeLists.txt").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        source_dir.join("src").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        source_dir.join("include").display()
-    );
+    for path in [jnivm_dir.join("src"), jnivm_dir.join("include")] {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
 
     let trace = env_flag("USAGI_JNIVM_TRACE", false);
     let debug = env_flag("USAGI_JNIVM_DEBUG", true);
+    let gc = env_flag("USAGI_JNIVM_GC", true);
 
-    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
-
-    let lib_dir = out_dir.join("lib");
-    fs::create_dir_all(&lib_dir).expect("failed to create native library directory");
-
-    let lib_dir_string = lib_dir.to_string_lossy().into_owned();
-
-    let mut config = cmake::Config::new(&source_dir);
-
-    config
+    let dst = cmake::Config::new(&manifest_dir)
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("CMAKE_POSITION_INDEPENDENT_CODE", "ON")
-        .define("CMAKE_ARCHIVE_OUTPUT_DIRECTORY", &lib_dir_string)
         .define("JNIVM_ENABLE_TESTS", "OFF")
         .define("JNIVM_ENABLE_TRACE", if trace { "ON" } else { "OFF" })
         .define("JNIVM_ENABLE_DEBUG", if debug { "ON" } else { "OFF" })
-        .define("JNIVM_ENABLE_GC", "ON");
+        .define("JNIVM_ENABLE_GC", if gc { "ON" } else { "OFF" })
+        .build();
 
-    for profile in ["DEBUG", "RELEASE", "RELWITHDEBINFO", "MINSIZEREL"] {
-        let key = format!("CMAKE_ARCHIVE_OUTPUT_DIRECTORY_{profile}");
-        config.define(&key, &lib_dir_string);
+    let lib_dir = dst.join("lib");
+
+    for lib in ["usagi_bridge", "jnivm"] {
+        if !lib_dir.join(format!("lib{lib}.a")).is_file()
+            && !lib_dir.join(format!("{lib}.lib")).is_file()
+        {
+            println!(
+                "cargo:warning=expected {lib} static library in {}",
+                lib_dir.display()
+            );
+        }
     }
 
-    config.build_target("jnivm");
-    config.build();
-
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
+
+    // link the bridge
+    println!("cargo:rustc-link-lib=static=usagi_bridge");
     println!("cargo:rustc-link-lib=static=jnivm");
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS is set by Cargo");
