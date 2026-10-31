@@ -122,6 +122,7 @@ exceptions = [
   # list
   #{ allow = ["Zlib"], crate = "adler32" },
 ]
+unused-allowed-license = "allow"
 
 # Some crates don't have (easily) machine readable licensing information,
 # adding a clarification entry for it allows you to manually specify the
@@ -249,7 +250,7 @@ allow-git = []
 
 [sources.allow-org]
 # github.com organizations to allow git sources for
-github = ["rurikoo"]
+github = []
 # gitlab.com organizations to allow git sources for
 gitlab = []
 # bitbucket.org organizations to allow git sources for
