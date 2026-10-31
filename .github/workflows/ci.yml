@@ -121,6 +121,9 @@ jobs:
       - name: Run unit and integration tests
         run: cargo test --all-targets
 
+      - name: Run compile-fail tests
+        run: cargo test --test compile_fail -- --ignored
+
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -166,3 +169,35 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check bans licenses sources
+
+  valgrind:
+    name: Valgrind
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Install valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends valgrind
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: usagi-cargo
+          key: valgrind
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Run FFI tests under valgrind
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: >-
+            valgrind --leak-check=full --errors-for-leak-kinds=definite
+            --error-exitcode=1
+        run: cargo test --test ffi
