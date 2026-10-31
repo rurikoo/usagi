@@ -21,6 +21,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
+  inputs.self.submodules = true;
 
   outputs =
     {
