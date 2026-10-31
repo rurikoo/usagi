@@ -11,12 +11,13 @@ set(JNIVM_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(third_party/libjnivm)
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(jnivm PRIVATE "SHELL:-include string")
-endif()
-
 add_library(usagi_bridge STATIC
     cpp/bridge.cpp
+)
+
+set_target_properties(usagi_bridge PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
 )
 
 target_include_directories(usagi_bridge
