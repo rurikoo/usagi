@@ -74,3 +74,11 @@ fn two_vms_coexist_on_one_thread() {
     assert_eq!(a.to_string_lossy().expect("conversion"), "first");
     assert_eq!(b.to_string_lossy().expect("conversion"), "second");
 }
+
+#[test]
+fn unknown_class_is_created_on_demand() {
+    let vm = Vm::new().expect("VM creation should succeed");
+
+    // libjnivm creates classes on demand instead of failing
+    assert!(vm.find_class("does/not/Exist").is_ok());
+}
