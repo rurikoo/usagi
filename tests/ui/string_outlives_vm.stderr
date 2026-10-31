@@ -1,0 +1,11 @@
+error[E0505]: cannot move out of `vm` because it is borrowed
+ --> tests/ui/string_outlives_vm.rs:6:10
+  |
+4 |     let vm = Vm::new().unwrap();
+  |         -- binding `vm` declared here
+5 |     let string = vm.new_string("hi").unwrap();
+  |                  -- borrow of `vm` occurs here
+6 |     drop(vm);
+  |          ^^ move out of `vm` occurs here
+7 |     let _ = string.to_string_lossy();
+  |             ------ borrow later used here

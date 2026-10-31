@@ -1,0 +1,40 @@
+error[E0277]: `NonNull<usagi::ffi::UsagiVm>` cannot be sent between threads safely
+ --> tests/ui/vm_not_send.rs:4:19
+  |
+4 |     assert_send::<usagi::Vm>();
+  |                   ^^^^^^^^^ `NonNull<usagi::ffi::UsagiVm>` cannot be sent between threads safely
+  |
+  = help: within `Vm`, the trait `Send` is not implemented for `NonNull<usagi::ffi::UsagiVm>`
+note: required because it appears within the type `Vm`
+ --> src/vm.rs
+  |
+  | pub struct Vm {
+  |            ^^
+note: required by a bound in `assert_send`
+ --> tests/ui/vm_not_send.rs:1:19
+  |
+1 | fn assert_send<T: Send>() {}
+  |                   ^^^^ required by this bound in `assert_send`
+
+error[E0277]: `Rc<()>` cannot be sent between threads safely
+ --> tests/ui/vm_not_send.rs:4:19
+  |
+4 |     assert_send::<usagi::Vm>();
+  |                   ^^^^^^^^^ `Rc<()>` cannot be sent between threads safely
+  |
+  = help: within `Vm`, the trait `Send` is not implemented for `Rc<()>`
+note: required because it appears within the type `PhantomData<Rc<()>>`
+ --> $RUST/core/src/marker.rs
+  |
+  | pub struct PhantomData<T: PointeeSized>;
+  |            ^^^^^^^^^^^
+note: required because it appears within the type `Vm`
+ --> src/vm.rs
+  |
+  | pub struct Vm {
+  |            ^^
+note: required by a bound in `assert_send`
+ --> tests/ui/vm_not_send.rs:1:19
+  |
+1 | fn assert_send<T: Send>() {}
+  |                   ^^^^ required by this bound in `assert_send`
