@@ -2,7 +2,11 @@
 name = "usagi"
 version = "0.1.0"
 edition = "2024"
-license = "GPLv3"
+rust-version = "1.85"
+license = "GPL-3.0-only"
+description = "Rust bindings for libjnivm"
+repository = "https://github.com/rurikoo/usagi"
+publish = false
 
 [lib]
 doctest = false
