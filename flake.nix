@@ -49,13 +49,28 @@
 
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           craneLib = (crane.mkLib pkgs).overrideToolchain (_: rustToolchain);
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [ pkgs.openssl ];
+          nativeBuildInputs = [
+            pkgs.pkg-config
+            pkgs.cmake
+          ];
+          buildInputs = [ ];
 
-          src = craneLib.cleanCargoSource ./.;
+          src = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.unions [
+              (craneLib.fileset.commonCargoSources ./.)
+              ./CMakeLists.txt
+              ./cpp
+              ./include
+              ./third_party
+              ./LICENSES
+            ];
+          };
+
           commonArgs = {
             inherit src nativeBuildInputs buildInputs;
             strictDeps = true;
+            dontUseCmakeConfigure = true;
           };
 
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
@@ -104,13 +119,7 @@
               }
             );
             fmt = craneLib.cargoFmt { inherit src; };
-            nextest = craneLib.cargoNextest (
-              commonArgs
-              // {
-                inherit cargoArtifacts;
-                cargoNextestExtraArgs = "--no-tests=pass";
-              }
-            );
+            nextest = craneLib.cargoNextest (commonArgs // { inherit cargoArtifacts; });
             formatting = treefmtEval.config.build.check self;
           };
 
