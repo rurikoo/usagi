@@ -1,6 +1,8 @@
 use std::{ffi::CString, marker::PhantomData, ptr::NonNull, rc::Rc};
 
-use crate::{RawJNIEnv, RawJavaVM, error::Error, ffi, object::Object, string::JavaString};
+use crate::{
+    RawJNIEnv, RawJavaVM, class::Class, error::Error, ffi, object::Object, string::JavaString,
+};
 
 pub struct Vm {
     raw: NonNull<ffi::UsagiVm>,
@@ -66,7 +68,7 @@ impl Vm {
     }
 
     /// looks up a class using its JVM internal name, for example "java/lang/String"
-    pub fn find_class(&self, internal_name: &str) -> Result<Object<'_>, Error> {
+    pub fn find_class(&self, internal_name: &str) -> Result<Class<'_>, Error> {
         if internal_name.is_empty() || internal_name.contains('\0') {
             return Err(Error::new(
                 "class lookup",
@@ -78,7 +80,9 @@ impl Vm {
 
         let raw = unsafe { ffi::usagi_vm_find_class(self.raw.as_ptr(), name.as_ptr().cast()) };
 
-        Object::from_raw(self, raw, "class lookup", "failed to find class")
+        let object = Object::from_raw(self, raw, "class lookup", "failed to find class")?;
+
+        Ok(Class::from_object(object))
     }
 
     /// creates a java string from a rust UTF-8 string

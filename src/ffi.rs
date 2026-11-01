@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+pub use jni_sys::{JNIEnv, JavaVM};
 use std::{
     ffi::c_char,
     marker::{PhantomData, PhantomPinned},
@@ -22,18 +23,6 @@ pub struct UsagiVm {
 
 #[repr(C)]
 pub struct UsagiObject {
-    _data: [u8; 0],
-    _marker: PhantomData<(*mut u8, PhantomPinned)>,
-}
-
-#[repr(C)]
-pub struct JavaVM {
-    _data: [u8; 0],
-    _marker: PhantomData<(*mut u8, PhantomPinned)>,
-}
-
-#[repr(C)]
-pub struct JNIEnv {
     _data: [u8; 0],
     _marker: PhantomData<(*mut u8, PhantomPinned)>,
 }
