@@ -195,9 +195,16 @@ jobs:
           key: valgrind
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Run FFI tests under valgrind
+      - name: Run all tests under valgrind
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: >-
             valgrind --leak-check=full --errors-for-leak-kinds=definite
             --error-exitcode=1
-        run: cargo test --test ffi
+          RUSTDOCFLAGS: >-
+            --test-runtool valgrind
+            --test-runtool-arg=--leak-check=full
+            --test-runtool-arg=--errors-for-leak-kinds=definite
+            --test-runtool-arg=--error-exitcode=1
+        run: |
+          cargo test --all-targets --no-fail-fast
+          cargo test --doc
