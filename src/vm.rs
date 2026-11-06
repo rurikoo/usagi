@@ -136,7 +136,7 @@ impl Drop for Vm {
     }
 }
 
-fn encode_modified_utf8(value: &str) -> Vec<u8> {
+pub(crate) fn encode_modified_utf8(value: &str) -> Vec<u8> {
     let mut output = Vec::new();
 
     for unit in value.encode_utf16() {

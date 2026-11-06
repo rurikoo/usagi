@@ -1,4 +1,8 @@
-use crate::object::Object;
+use std::{ffi::c_int, marker::PhantomData, ptr::NonNull};
+
+use crate::{
+    error::Error, ffi, method::Method, object::Object, sig::Signature, vm::encode_modified_utf8,
+};
 
 pub struct Class<'vm> {
     object: Object<'vm>,
@@ -12,5 +16,47 @@ impl<'vm> Class<'vm> {
     /// the underlying object handle
     pub fn as_object(&self) -> &Object<'vm> {
         &self.object
+    }
+
+    pub fn method(&self, name: &str, signature: &str) -> Result<Method<'_>, Error> {
+        self.lookup(name, signature, false)
+    }
+
+    pub fn static_method(&self, name: &str, signature: &str) -> Result<Method<'_>, Error> {
+        self.lookup(name, signature, true)
+    }
+
+    fn lookup(&self, name: &str, signature: &str, is_static: bool) -> Result<Method<'_>, Error> {
+        // parse first so invalid text never reaches C++!!
+        let signature = Signature::parse(signature)?;
+
+        if name.is_empty() || name.contains('\0') {
+            return Err(Error::new(
+                "method lookup",
+                "method name must be nonempty and contain no NUL",
+            ));
+        }
+
+        let name = encode_modified_utf8(name);
+        let signature_text = encode_modified_utf8(signature.as_str());
+
+        let raw = unsafe {
+            ffi::usagi_class_get_method(
+                self.object.raw.as_ptr(),
+                name.as_ptr().cast(),
+                signature_text.as_ptr().cast(),
+                c_int::from(is_static),
+            )
+        };
+
+        let id = NonNull::new(raw)
+            .ok_or_else(|| Error::from_native("method lookup", "failed to find method"))?;
+
+        Ok(Method {
+            id,
+            signature,
+            is_static,
+            _class: PhantomData,
+        })
     }
 }
