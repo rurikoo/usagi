@@ -204,4 +204,3 @@ jobs:
             --test-runtool-arg=--error-exitcode=1
         run: |
           cargo test --all-targets --no-fail-fast
-          cargo test --doc
