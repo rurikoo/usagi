@@ -48,7 +48,7 @@
             overlays = [ rust-overlay.overlays.default ];
           };
 
-          jdk = pkgs.jdk-headless;
+          jdk = pkgs.jdk_headless;
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           craneLib = (crane.mkLib pkgs).overrideToolchain (_: rustToolchain);
           nativeBuildInputs = [
