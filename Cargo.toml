@@ -15,8 +15,5 @@ path = "src/lib.rs"
 [build-dependencies]
 cmake = "0.1.58"
 
-[dev-dependencies]
-trybuild = "=1.0.122"
-
 [dependencies]
 jni-sys = "0.4.1"
