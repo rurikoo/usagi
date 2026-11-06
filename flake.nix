@@ -48,13 +48,14 @@
             overlays = [ rust-overlay.overlays.default ];
           };
 
+          jdk = pkgs.jdk_headless;
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           craneLib = (crane.mkLib pkgs).overrideToolchain (_: rustToolchain);
           nativeBuildInputs = [
             pkgs.pkg-config
             pkgs.cmake
           ];
-          buildInputs = [ ];
+          buildInputs = [ jdk ];
 
           src = lib.fileset.toSource {
             root = ./.;
@@ -72,6 +73,9 @@
             inherit src nativeBuildInputs buildInputs;
             strictDeps = true;
             dontUseCmakeConfigure = true;
+
+            JAVA_HOME = "${jdk.home}";
+            CPATH = "${jdk.home}/include:${jdk.home}/include/linux";
           };
 
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
@@ -143,6 +147,8 @@
 
             env = {
               RUST_BACKTRACE = "1";
+              JAVA_HOME = "${jdk.home}";
+              CPATH = "${jdk.home}/include:${jdk.home}/include/linux";
               # runtime libraries for gui/graphics crates, uncomment and extend if needed:
               # LD_LIBRARY_PATH = lib.makeLibraryPath [ pkgs.wayland pkgs.libxkbcommon pkgs.vulkan-loader ];
             }

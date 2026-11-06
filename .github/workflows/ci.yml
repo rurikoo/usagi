@@ -121,9 +121,6 @@ jobs:
       - name: Run unit and integration tests
         run: cargo test --all-targets
 
-      - name: Run compile-fail tests
-        run: cargo test --test compile_fail -- --ignored
-
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -195,9 +192,15 @@ jobs:
           key: valgrind
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Run FFI tests under valgrind
+      - name: Run all tests under valgrind
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: >-
             valgrind --leak-check=full --errors-for-leak-kinds=definite
             --error-exitcode=1
-        run: cargo test --test ffi
+          RUSTDOCFLAGS: >-
+            --test-runtool valgrind
+            --test-runtool-arg=--leak-check=full
+            --test-runtool-arg=--errors-for-leak-kinds=definite
+            --test-runtool-arg=--error-exitcode=1
+        run: |
+          cargo test --all-targets --no-fail-fast

@@ -37,7 +37,7 @@ impl Parser<'_> {
     }
 
     /// reads one complete type and leaves the cursor right after it
-    fn parse_type(&mut self) -> Result<Type, Error> {
+    fn parse_type(&mut self, depth: usize) -> Result<Type, Error> {
         match self.peek() {
             Some(b'V') => {
                 self.bump();
@@ -98,8 +98,12 @@ impl Parser<'_> {
                 Ok(Type::Object(name))
             }
             Some(b'[') => {
+                if depth >= 255 {
+                    return Err(err("array nesting exceeds 255 dimensions"));
+                }
                 self.bump();
-                let element = self.parse_type()?;
+                let element = self.parse_type(depth + 1)?;
+
                 if element == Type::Void {
                     return Err(err(format!("void array at position {}", self.pos)));
                 }
@@ -119,6 +123,18 @@ fn err(message: impl Into<String>) -> Error {
 }
 
 impl Signature {
+    pub fn args(&self) -> &[Type] {
+        &self.args
+    }
+
+    pub fn ret(&self) -> &Type {
+        &self.ret
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
     pub fn parse(text: &str) -> Result<Self, Error> {
         let mut parser = Parser {
             bytes: text.as_bytes(),
@@ -138,7 +154,7 @@ impl Signature {
                     break;
                 }
                 Some(_) => {
-                    let ty = parser.parse_type()?;
+                    let ty = parser.parse_type(0)?;
                     if ty == Type::Void {
                         return Err(err("void is not allowed as an argument"));
                     }
@@ -148,7 +164,7 @@ impl Signature {
             }
         }
 
-        let ret = parser.parse_type()?;
+        let ret = parser.parse_type(0)?;
 
         if parser.pos != parser.bytes.len() {
             return Err(err(format!(
@@ -377,5 +393,15 @@ mod tests {
     fn rejects_void_argument() {
         parse_err("(V)V", "void");
         parse_err("(IV)V", "void");
+    }
+
+    #[test]
+    fn accepts_maximum_array_depth() {
+        parse_ok(&format!("({}I)V", "[".repeat(255)));
+    }
+
+    #[test]
+    fn rejects_excessive_array_depth() {
+        parse_err(&format!("({}I)V", "[".repeat(256)), "nesting");
     }
 }

@@ -360,6 +360,52 @@ UsagiObject *usagi_vm_find_class(UsagiVm *vm, const char *internal_name) {
   return nullptr;
 }
 
+void *usagi_class_get_method(const UsagiObject *class_object, const char *name,
+                             const char *signature, int is_static) {
+  clear_error();
+
+  try {
+    if (!valid_object(class_object)) {
+      return nullptr;
+    }
+
+    if (class_object->kind != UsagiObjectKind::Class) {
+      set_error("object is not a Java class");
+      return nullptr;
+    }
+
+    if (!name || name[0] == '\0' || !signature || signature[0] == '\0') {
+      set_error("invalid method name or signature");
+      return nullptr;
+    }
+
+    JNIEnv *env = current_env(class_object->owner);
+
+    if (!env) {
+      return nullptr;
+    }
+
+    jclass cls = static_cast<jclass>(class_object->global_ref);
+
+    jmethodID id = is_static ? env->GetStaticMethodID(cls, name, signature)
+                             : env->GetMethodID(cls, name, signature);
+
+    if (!id) {
+      set_error("method lookup returned null");
+      return nullptr;
+    }
+
+    clear_error();
+    return reinterpret_cast<void *>(id);
+  } catch (const std::exception &e) {
+    set_error(e.what());
+  } catch (...) {
+    set_error("unexpected exception during method lookup");
+  }
+
+  return nullptr;
+}
+
 UsagiObject *usagi_vm_new_string_utf16(UsagiVm *vm, const uint16_t *units,
                                        size_t length) {
   clear_error();
