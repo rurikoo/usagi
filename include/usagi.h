@@ -67,6 +67,14 @@ jint usagi_string_copy_utf16(
     size_t *out_length
 );
 
+/* returns a jmethodID, or NULL on failure. class_object must be a class handle */
+void *usagi_class_get_method(
+    const UsagiObject *class_object,
+    const char *name,
+    const char *signature,
+    int is_static
+);
+
 /* error from the last failed call on this thread */
 const char *usagi_last_error(void);
 
