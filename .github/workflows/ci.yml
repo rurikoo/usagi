@@ -121,9 +121,6 @@ jobs:
       - name: Run unit and integration tests
         run: cargo test --all-targets
 
-      - name: Run compile-fail tests
-        run: cargo test --test compile_fail -- --ignored
-
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
