@@ -5,6 +5,11 @@ pub struct JavaString<'vm> {
 }
 
 impl<'vm> JavaString<'vm> {
+    #[allow(dead_code)]
+    pub(crate) fn object(&self) -> &Object<'vm> {
+        &self.object
+    }
+
     pub(crate) fn from_object(object: Object<'vm>) -> Self {
         Self { object }
     }
