@@ -1,4 +1,4 @@
-use std::{ffi::c_int, marker::PhantomData, ptr::NonNull};
+use std::{ffi::c_int, ptr::NonNull};
 
 use crate::{
     error::Error, ffi, method::Method, object::Object, sig::Signature, vm::encode_modified_utf8,
@@ -56,7 +56,8 @@ impl<'vm> Class<'vm> {
             id,
             signature,
             is_static,
-            _class: PhantomData,
+            class: self.object.raw,
+            vm: self.object.vm(),
         })
     }
 }

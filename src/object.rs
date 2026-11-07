@@ -19,6 +19,10 @@ impl<'vm> Object<'vm> {
         Ok(Self { raw, vm })
     }
 
+    pub(crate) fn vm(&self) -> &'vm Vm {
+        self.vm
+    }
+
     #[allow(dead_code)]
     /// true when this object was created by vm
     pub(crate) fn belongs_to(&self, vm: &Vm) -> bool {
