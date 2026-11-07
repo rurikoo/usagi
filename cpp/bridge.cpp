@@ -406,6 +406,55 @@ void *usagi_class_get_method(const UsagiObject *class_object, const char *name,
   return nullptr;
 }
 
+namespace {
+// hooked as usagi/Test.add(II)I
+jint usagi_test_add(JNIEnv *, jclass, jint a, jint b) { return a + b; }
+} // namespace
+
+jint usagi_test_register_add(UsagiVm *vm) {
+  clear_error();
+
+  try {
+    if (!valid_vm(vm)) {
+      return USAGI_ERROR;
+    }
+
+    JNIEnv *env = current_env(vm);
+
+    if (!env) {
+      return USAGI_ERROR;
+    }
+
+    jclass local = env->FindClass("usagi/Test");
+
+    if (!local) {
+      set_error("FindClass returned null for usagi/Test");
+      return USAGI_ERROR;
+    }
+
+    LocalRefGuard guard{env, local};
+
+    auto *jenv = jnivm::ENV::FromJNIEnv(env);
+    std::shared_ptr<jnivm::Class> cl = jenv->GetClass("usagi/Test");
+
+    if (!cl) {
+      set_error("jnivm could not provide usagi/Test");
+      return USAGI_ERROR;
+    }
+
+    cl->Hook(jenv, "add", &usagi_test_add);
+
+    clear_error();
+    return USAGI_OK;
+  } catch (const std::exception &e) {
+    set_error(e.what());
+  } catch (...) {
+    set_error("unexpected exception registering test method");
+  }
+
+  return USAGI_ERROR;
+}
+
 UsagiObject *usagi_vm_new_string_utf16(UsagiVm *vm, const uint16_t *units,
                                        size_t length) {
   clear_error();

@@ -75,6 +75,8 @@ void *usagi_class_get_method(
     int is_static
 );
 
+jint usagi_test_register_add(UsagiVm *vm);
+
 /* error from the last failed call on this thread */
 const char *usagi_last_error(void);
 

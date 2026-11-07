@@ -126,6 +126,11 @@ impl Vm {
 
         Ok(())
     }
+
+    #[cfg(test)]
+    pub(crate) fn raw_ptr(&self) -> *mut ffi::UsagiVm {
+        self.raw.as_ptr()
+    }
 }
 
 impl Drop for Vm {

@@ -70,6 +70,8 @@ unsafe extern "C" {
         is_static: c_int,
     ) -> *mut c_void;
 
+    pub fn usagi_test_register_add(vm: *mut UsagiVm) -> Jint;
+
     pub fn usagi_last_error() -> *const c_char;
 }
 
