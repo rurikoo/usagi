@@ -1,3 +1,10 @@
+/// THIS C++ BRIDGE CODE SUCKS
+/// I am not proud of it
+/// I dont like it
+/// pls someone rewrite whole C++ part of repo, i dont like this
+/// ~yon
+
+#include "jni.h"
 #include "usagi.h"
 
 #include <jnivm.h>
@@ -114,6 +121,19 @@ struct StringCharsGuard {
   }
 };
 
+// clears a pending java exception, true if there was one
+bool take_exception(JNIEnv *env) noexcept {
+  try {
+    if (env->ExceptionCheck()) {
+      env->ExceptionClear();
+      return true;
+    }
+  } catch (...) {
+  }
+
+  return false;
+}
+
 UsagiObject *make_object_handle(const std::shared_ptr<jnivm::VM> &vm,
                                 JNIEnv *env, jobject local_ref,
                                 UsagiObjectKind kind) {
@@ -147,7 +167,77 @@ bool valid_object(const UsagiObject *object) noexcept {
 
 } // namespace
 
+namespace {
+// hooked as usagi/Test.add(II)I
+jint usagi_test_add(JNIEnv *, jclass, jint a, jint b) { return a + b; }
+
+// hooked as usagi/Test.fail()I, always throws
+jint usagi_test_fail(JNIEnv *env, jclass) {
+  jclass type = env->FindClass("java/lang/RuntimeException"); // java/laugh/Cry
+
+  if (type) {
+    env->ThrowNew(type, "usagi test failure");
+  }
+
+  return 0;
+}
+
+template <class F>
+jint register_test_method(UsagiVm *vm, const char *name, F fn) {
+  clear_error();
+
+  try {
+    if (!valid_vm(vm)) {
+      return USAGI_ERROR;
+    }
+
+    JNIEnv *env = current_env(vm);
+
+    if (!env) {
+      return USAGI_ERROR;
+    }
+
+    jclass local = env->FindClass("usagi/Test");
+
+    if (!local) {
+      set_error("FindClass returned null for usagi/Test");
+      return USAGI_ERROR;
+    }
+
+    LocalRefGuard guard{env, local};
+
+    auto *jenv = jnivm::ENV::FromJNIEnv(env);
+    std::shared_ptr<jnivm::Class> cl = jenv->GetClass("usagi/Test");
+
+    if (!cl) {
+      set_error("jnivm could not provide usagi/Test");
+      return USAGI_ERROR;
+    }
+
+    cl->Hook(jenv, name, std::move(fn));
+
+    clear_error();
+    return USAGI_OK;
+  } catch (const std::exception &e) {
+    set_error(e.what());
+  } catch (...) {
+    set_error("unexpected exception registering test method");
+  }
+
+  return USAGI_ERROR;
+}
+} // namespace
+
 extern "C" {
+
+/// replaced dis with easier and shorter func
+jint usagi_test_register_add(UsagiVm *vm) {
+  return register_test_method(vm, "add", &usagi_test_add);
+}
+
+jint usagi_test_register_fail(UsagiVm *vm) {
+  return register_test_method(vm, "fail", &usagi_test_fail);
+}
 
 const char *usagi_last_error(void) { return last_error.c_str(); }
 
@@ -464,68 +554,89 @@ jint usagi_call_method(const UsagiObject *class_object,
       self = receiver->global_ref;
     }
 
-    switch (return_kind) {
-    case 'V':
-      if (is_static) {
-        env->CallStaticVoidMethodA(cls, mid, args);
-      } else {
-        env->CallVoidMethodA(self, mid, args);
-      }
-      break;
-    case 'Z':
-      out_value->z = is_static ? env->CallStaticBooleanMethodA(cls, mid, args)
-                               : env->CallBooleanMethodA(self, mid, args);
-      break;
-    case 'B':
-      out_value->b = is_static ? env->CallStaticByteMethodA(cls, mid, args)
-                               : env->CallByteMethodA(self, mid, args);
-      break;
-    case 'C':
-      out_value->c = is_static ? env->CallStaticCharMethodA(cls, mid, args)
-                               : env->CallCharMethodA(self, mid, args);
-      break;
-    case 'S':
-      out_value->s = is_static ? env->CallStaticShortMethodA(cls, mid, args)
-                               : env->CallShortMethodA(self, mid, args);
-      break;
-    case 'I':
-      out_value->i = is_static ? env->CallStaticIntMethodA(cls, mid, args)
-                               : env->CallIntMethodA(self, mid, args);
-      break;
-    case 'J':
-      out_value->j = is_static ? env->CallStaticLongMethodA(cls, mid, args)
-                               : env->CallLongMethodA(self, mid, args);
-      break;
-    case 'F':
-      out_value->f = is_static ? env->CallStaticFloatMethodA(cls, mid, args)
-                               : env->CallFloatMethodA(self, mid, args);
-      break;
-    case 'D':
-      out_value->d = is_static ? env->CallStaticDoubleMethodA(cls, mid, args)
-                               : env->CallDoubleMethodA(self, mid, args);
-      break;
-    case 'L': {
-      jobject result = is_static ? env->CallStaticObjectMethodA(cls, mid, args)
-                                 : env->CallObjectMethodA(self, mid, args);
+    jobject result = nullptr;
+    bool threw = false;
+    std::string what;
 
-      if (result) {
-        LocalRefGuard guard{env, result};
-
-        UsagiObject *handle =
-            make_object_handle(class_object->owner, env, result,
-                               static_cast<UsagiObjectKind>(out_object_kind));
-
-        if (!handle) {
-          return USAGI_ERROR;
+    // jnivm rethrows a java exception as a c++ one, so catch it here
+    try {
+      switch (return_kind) {
+      case 'V':
+        if (is_static) {
+          env->CallStaticVoidMethodA(cls, mid, args);
+        } else {
+          env->CallVoidMethodA(self, mid, args);
         }
-
-        *out_object = handle;
+        break;
+      case 'Z':
+        out_value->z = is_static ? env->CallStaticBooleanMethodA(cls, mid, args)
+                                 : env->CallBooleanMethodA(self, mid, args);
+        break;
+      case 'B':
+        out_value->b = is_static ? env->CallStaticByteMethodA(cls, mid, args)
+                                 : env->CallByteMethodA(self, mid, args);
+        break;
+      case 'C':
+        out_value->c = is_static ? env->CallStaticCharMethodA(cls, mid, args)
+                                 : env->CallCharMethodA(self, mid, args);
+        break;
+      case 'S':
+        out_value->s = is_static ? env->CallStaticShortMethodA(cls, mid, args)
+                                 : env->CallShortMethodA(self, mid, args);
+        break;
+      case 'I':
+        out_value->i = is_static ? env->CallStaticIntMethodA(cls, mid, args)
+                                 : env->CallIntMethodA(self, mid, args);
+        break;
+      case 'J':
+        out_value->j = is_static ? env->CallStaticLongMethodA(cls, mid, args)
+                                 : env->CallLongMethodA(self, mid, args);
+        break;
+      case 'F':
+        out_value->f = is_static ? env->CallStaticFloatMethodA(cls, mid, args)
+                                 : env->CallFloatMethodA(self, mid, args);
+        break;
+      case 'D':
+        out_value->d = is_static ? env->CallStaticDoubleMethodA(cls, mid, args)
+                                 : env->CallDoubleMethodA(self, mid, args);
+        break;
+      case 'L':
+        result = is_static ? env->CallStaticObjectMethodA(cls, mid, args)
+                           : env->CallObjectMethodA(self, mid, args);
+        break;
+      default:
+        set_error("unknown return kind");
+        return USAGI_ERROR;
       }
-      break;
+    } catch (const std::exception &e) {
+      threw = true;
+      what = e.what();
+    } catch (...) {
+      threw = true;
     }
-    default:
-      set_error("unknown return kind");
-      return USAGI_ERROR;
+
+    // frees the local ref on every path below
+    LocalRefGuard guard{env, result};
+
+    // jnivm keeps the exception on the env even after rethrowing it
+    const bool pending = take_exception(env);
+
+    if (threw || pending) {
+      out_value->j = 0;
+      set_error(what.empty() ? "java method threw an exception" : what.c_str());
+      return USAGI_EXCEPTION;
+    }
+
+    if (result) {
+      UsagiObject *handle =
+          make_object_handle(class_object->owner, env, result,
+                             static_cast<UsagiObjectKind>(out_object_kind));
+
+      if (!handle) {
+        return USAGI_ERROR;
+      }
+
+      *out_object = handle;
     }
 
     clear_error();
@@ -534,55 +645,6 @@ jint usagi_call_method(const UsagiObject *class_object,
     set_error(e.what());
   } catch (...) {
     set_error("unexpected exception calling Java method");
-  }
-
-  return USAGI_ERROR;
-}
-
-namespace {
-// hooked as usagi/Test.add(II)I
-jint usagi_test_add(JNIEnv *, jclass, jint a, jint b) { return a + b; }
-} // namespace
-
-jint usagi_test_register_add(UsagiVm *vm) {
-  clear_error();
-
-  try {
-    if (!valid_vm(vm)) {
-      return USAGI_ERROR;
-    }
-
-    JNIEnv *env = current_env(vm);
-
-    if (!env) {
-      return USAGI_ERROR;
-    }
-
-    jclass local = env->FindClass("usagi/Test");
-
-    if (!local) {
-      set_error("FindClass returned null for usagi/Test");
-      return USAGI_ERROR;
-    }
-
-    LocalRefGuard guard{env, local};
-
-    auto *jenv = jnivm::ENV::FromJNIEnv(env);
-    std::shared_ptr<jnivm::Class> cl = jenv->GetClass("usagi/Test");
-
-    if (!cl) {
-      set_error("jnivm could not provide usagi/Test");
-      return USAGI_ERROR;
-    }
-
-    cl->Hook(jenv, "add", &usagi_test_add);
-
-    clear_error();
-    return USAGI_OK;
-  } catch (const std::exception &e) {
-    set_error(e.what());
-  } catch (...) {
-    set_error("unexpected exception registering test method");
   }
 
   return USAGI_ERROR;

@@ -18,6 +18,7 @@ pub const JNI_ERR: Jint = -1;
 pub const USAGI_OK: Jint = 0;
 pub const USAGI_ERROR: Jint = -1;
 pub const USAGI_BUFFER_TOO_SMALL: Jint = -2;
+pub const USAGI_EXCEPTION: Jint = -3;
 
 #[repr(C)]
 pub struct UsagiVm {
@@ -83,6 +84,7 @@ unsafe extern "C" {
     ) -> Jint;
 
     pub fn usagi_test_register_add(vm: *mut UsagiVm) -> Jint;
+    pub fn usagi_test_register_fail(vm: *mut UsagiVm) -> Jint;
 
     pub fn usagi_last_error() -> *const c_char;
 }

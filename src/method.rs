@@ -106,7 +106,12 @@ impl<'class> Method<'class> {
         };
 
         if status != ffi::USAGI_OK {
-            return Err(Error::from_native("method call", "java method call failed"));
+            let operation = if status == ffi::USAGI_EXCEPTION {
+                "java exception"
+            } else {
+                "method call"
+            };
+            return Err(Error::from_native(operation, "java method call failed"));
         }
 
         let object = self.reference(out_object)?;
@@ -188,6 +193,11 @@ mod tests {
         assert_eq!(status, ffi::USAGI_OK);
     }
 
+    fn register_fail(vm: &Vm) {
+        let status = unsafe { ffi::usagi_test_register_fail(vm.raw_ptr()) };
+        assert_eq!(status, ffi::USAGI_OK);
+    }
+
     #[test]
     fn add_returns_the_sum_of_its_arguments() {
         let vm = Vm::new().unwrap();
@@ -227,5 +237,35 @@ mod tests {
             add.call(Some(text.object()), &[Value::Int(3), Value::Int(4)])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn thrown_exception_becomes_an_error() {
+        let vm = Vm::new().unwrap();
+        register_fail(&vm);
+
+        let class = vm.find_class("usagi/Test").unwrap();
+        let fail = class.static_method("fail", "()I").unwrap();
+
+        let error = fail.call(None, &[]).map(|_| ()).unwrap_err();
+        assert_eq!(error.operation(), "java exception");
+    }
+
+    #[test]
+    fn calls_work_after_an_exception() {
+        let vm = Vm::new().unwrap();
+        register_add(&vm);
+        register_fail(&vm);
+
+        let class = vm.find_class("usagi/Test").unwrap();
+        let fail = class.static_method("fail", "()I").unwrap();
+        let add = class.static_method("add", "(II)I").unwrap();
+
+        assert!(fail.call(None, &[]).is_err());
+
+        match add.call(None, &[Value::Int(3), Value::Int(4)]).unwrap() {
+            Output::Int(sum) => assert_eq!(sum, 7),
+            _ => panic!("add should return an int"),
+        }
     }
 }
