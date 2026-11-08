@@ -5,6 +5,7 @@ mod method;
 mod object;
 mod sig;
 mod string;
+mod value;
 mod vm;
 
 pub use class::Class;
@@ -16,3 +17,4 @@ pub use vm::Vm;
 
 pub use ffi::{JNIEnv as RawJNIEnv, JavaVM as RawJavaVM};
 pub use sig::{Signature, Type};
+pub use value::{Value, check_args};

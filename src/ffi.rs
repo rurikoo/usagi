@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-pub use jni_sys::{JNIEnv, JavaVM};
+pub use jni_sys::{JNIEnv, JavaVM, jvalue};
 use std::{
     ffi::c_char,
     ffi::c_int,
@@ -69,6 +69,20 @@ unsafe extern "C" {
         signature: *const c_char,
         is_static: c_int,
     ) -> *mut c_void;
+
+    pub fn usagi_call_method(
+        class_object: *const UsagiObject,
+        receiver: *const UsagiObject,
+        method_id: *mut c_void,
+        is_static: c_int,
+        return_kind: c_char,
+        args: *mut jvalue,
+        out_value: *mut jvalue,
+        out_object_kind: c_int,
+        out_object: *mut *mut UsagiObject,
+    ) -> Jint;
+
+    pub fn usagi_test_register_add(vm: *mut UsagiVm) -> Jint;
 
     pub fn usagi_last_error() -> *const c_char;
 }

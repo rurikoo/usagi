@@ -114,14 +114,13 @@ struct StringCharsGuard {
   }
 };
 
-UsagiObject *make_object_handle(UsagiVm *vm, JNIEnv *env, jobject local_ref,
+UsagiObject *make_object_handle(const std::shared_ptr<jnivm::VM> &vm,
+                                JNIEnv *env, jobject local_ref,
                                 UsagiObjectKind kind) {
-  if (!valid_vm(vm) || !env || !local_ref) {
+  if (!vm || !env || !local_ref) {
     set_error("invalid VM, JNI environment, or object reference");
     return nullptr;
   }
-
-  auto handle = std::make_unique<UsagiObject>();
 
   jobject global_ref = env->NewGlobalRef(local_ref);
 
@@ -130,10 +129,10 @@ UsagiObject *make_object_handle(UsagiVm *vm, JNIEnv *env, jobject local_ref,
     return nullptr;
   }
 
-  handle->owner = vm->inner;
+  auto handle = std::make_unique<UsagiObject>();
+  handle->owner = vm;
   handle->global_ref = global_ref;
   handle->kind = kind;
-
   return handle.release();
 }
 
@@ -344,7 +343,7 @@ UsagiObject *usagi_vm_find_class(UsagiVm *vm, const char *internal_name) {
     LocalRefGuard guard{env, local};
 
     UsagiObject *object =
-        make_object_handle(vm, env, local, UsagiObjectKind::Class);
+        make_object_handle(vm->inner, env, local, UsagiObjectKind::Class);
 
     if (object) {
       clear_error();
@@ -406,6 +405,189 @@ void *usagi_class_get_method(const UsagiObject *class_object, const char *name,
   return nullptr;
 }
 
+jint usagi_call_method(const UsagiObject *class_object,
+                       const UsagiObject *receiver, void *method_id,
+                       int is_static, char return_kind, jvalue *args,
+                       jvalue *out_value, int out_object_kind,
+                       UsagiObject **out_object) {
+  clear_error();
+
+  if (!out_value || !out_object) {
+    set_error("null output pointer");
+    return USAGI_ERROR;
+  }
+
+  *out_object = nullptr;
+  out_value->j = 0;
+
+  try {
+    if (!valid_object(class_object)) {
+      return USAGI_ERROR;
+    }
+
+    if (!method_id) {
+      set_error("null method id");
+      return USAGI_ERROR;
+    }
+
+    if (class_object->kind != UsagiObjectKind::Class) {
+      set_error("object is not a Java class");
+      return USAGI_ERROR;
+    }
+
+    JNIEnv *env = current_env(class_object->owner);
+
+    if (!env) {
+      return USAGI_ERROR;
+    }
+
+    jclass cls = static_cast<jclass>(class_object->global_ref);
+    jmethodID mid = static_cast<jmethodID>(method_id);
+    jobject self = nullptr;
+
+    if (!is_static) {
+      if (!valid_object(receiver)) {
+        return USAGI_ERROR;
+      }
+
+      if (receiver->owner != class_object->owner) {
+        set_error("receiver belongs to a different vm");
+        return USAGI_ERROR;
+      }
+
+      // method ids only work on instances of their class
+      if (!env->IsInstanceOf(receiver->global_ref, cls)) {
+        set_error("receiver is not an instance of the method's class");
+        return USAGI_ERROR;
+      }
+
+      self = receiver->global_ref;
+    }
+
+    switch (return_kind) {
+    case 'V':
+      if (is_static) {
+        env->CallStaticVoidMethodA(cls, mid, args);
+      } else {
+        env->CallVoidMethodA(self, mid, args);
+      }
+      break;
+    case 'Z':
+      out_value->z = is_static ? env->CallStaticBooleanMethodA(cls, mid, args)
+                               : env->CallBooleanMethodA(self, mid, args);
+      break;
+    case 'B':
+      out_value->b = is_static ? env->CallStaticByteMethodA(cls, mid, args)
+                               : env->CallByteMethodA(self, mid, args);
+      break;
+    case 'C':
+      out_value->c = is_static ? env->CallStaticCharMethodA(cls, mid, args)
+                               : env->CallCharMethodA(self, mid, args);
+      break;
+    case 'S':
+      out_value->s = is_static ? env->CallStaticShortMethodA(cls, mid, args)
+                               : env->CallShortMethodA(self, mid, args);
+      break;
+    case 'I':
+      out_value->i = is_static ? env->CallStaticIntMethodA(cls, mid, args)
+                               : env->CallIntMethodA(self, mid, args);
+      break;
+    case 'J':
+      out_value->j = is_static ? env->CallStaticLongMethodA(cls, mid, args)
+                               : env->CallLongMethodA(self, mid, args);
+      break;
+    case 'F':
+      out_value->f = is_static ? env->CallStaticFloatMethodA(cls, mid, args)
+                               : env->CallFloatMethodA(self, mid, args);
+      break;
+    case 'D':
+      out_value->d = is_static ? env->CallStaticDoubleMethodA(cls, mid, args)
+                               : env->CallDoubleMethodA(self, mid, args);
+      break;
+    case 'L': {
+      jobject result = is_static ? env->CallStaticObjectMethodA(cls, mid, args)
+                                 : env->CallObjectMethodA(self, mid, args);
+
+      if (result) {
+        LocalRefGuard guard{env, result};
+
+        UsagiObject *handle =
+            make_object_handle(class_object->owner, env, result,
+                               static_cast<UsagiObjectKind>(out_object_kind));
+
+        if (!handle) {
+          return USAGI_ERROR;
+        }
+
+        *out_object = handle;
+      }
+      break;
+    }
+    default:
+      set_error("unknown return kind");
+      return USAGI_ERROR;
+    }
+
+    clear_error();
+    return USAGI_OK;
+  } catch (const std::exception &e) {
+    set_error(e.what());
+  } catch (...) {
+    set_error("unexpected exception calling Java method");
+  }
+
+  return USAGI_ERROR;
+}
+
+namespace {
+// hooked as usagi/Test.add(II)I
+jint usagi_test_add(JNIEnv *, jclass, jint a, jint b) { return a + b; }
+} // namespace
+
+jint usagi_test_register_add(UsagiVm *vm) {
+  clear_error();
+
+  try {
+    if (!valid_vm(vm)) {
+      return USAGI_ERROR;
+    }
+
+    JNIEnv *env = current_env(vm);
+
+    if (!env) {
+      return USAGI_ERROR;
+    }
+
+    jclass local = env->FindClass("usagi/Test");
+
+    if (!local) {
+      set_error("FindClass returned null for usagi/Test");
+      return USAGI_ERROR;
+    }
+
+    LocalRefGuard guard{env, local};
+
+    auto *jenv = jnivm::ENV::FromJNIEnv(env);
+    std::shared_ptr<jnivm::Class> cl = jenv->GetClass("usagi/Test");
+
+    if (!cl) {
+      set_error("jnivm could not provide usagi/Test");
+      return USAGI_ERROR;
+    }
+
+    cl->Hook(jenv, "add", &usagi_test_add);
+
+    clear_error();
+    return USAGI_OK;
+  } catch (const std::exception &e) {
+    set_error(e.what());
+  } catch (...) {
+    set_error("unexpected exception registering test method");
+  }
+
+  return USAGI_ERROR;
+}
+
 UsagiObject *usagi_vm_new_string_utf16(UsagiVm *vm, const uint16_t *units,
                                        size_t length) {
   clear_error();
@@ -447,7 +629,7 @@ UsagiObject *usagi_vm_new_string_utf16(UsagiVm *vm, const uint16_t *units,
     LocalRefGuard guard{env, local};
 
     UsagiObject *object =
-        make_object_handle(vm, env, local, UsagiObjectKind::String);
+        make_object_handle(vm->inner, env, local, UsagiObjectKind::String);
 
     if (object) {
       clear_error();

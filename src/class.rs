@@ -1,4 +1,4 @@
-use std::{ffi::c_int, marker::PhantomData, ptr::NonNull};
+use std::{ffi::c_int, ptr::NonNull};
 
 use crate::{
     error::Error, ffi, method::Method, object::Object, sig::Signature, vm::encode_modified_utf8,
@@ -56,7 +56,28 @@ impl<'vm> Class<'vm> {
             id,
             signature,
             is_static,
-            _class: PhantomData,
+            class: self.object.raw,
+            vm: self.object.vm(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Vm, ffi};
+
+    #[test]
+    fn registers_native_test_method() {
+        let vm = Vm::new().expect("VM creation should succeed");
+
+        let status = unsafe { ffi::usagi_test_register_add(vm.raw_ptr()) };
+        assert_eq!(status, ffi::USAGI_OK);
+
+        let class = vm
+            .find_class("usagi/Test")
+            .expect("usagi/Test should exist");
+        class
+            .static_method("add", "(II)I")
+            .expect("add(II)I should be found after registration");
     }
 }
