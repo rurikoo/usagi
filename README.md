@@ -6,3 +6,6 @@ Rust bindings for the C++ library `libjnivm`, for using pseudo **JNI** (Java Nat
 
 > [!WARNING]
 > This library is experimental and a work in progress. API and behavior may change, and bugs are possible! `.w.`
+
+## Status
+Currently, Linux (**x86_64** / **aarch64**) is officially supported. Any other platforms is not supported.

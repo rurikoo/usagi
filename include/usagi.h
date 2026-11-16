@@ -12,7 +12,12 @@ extern "C" {
 typedef struct UsagiVm UsagiVm;
 typedef struct UsagiObject UsagiObject;
 
-enum { USAGI_OK = 0, USAGI_ERROR = -1, USAGI_BUFFER_TOO_SMALL = -2 };
+enum {
+  USAGI_OK = 0,
+  USAGI_ERROR = -1,
+  USAGI_BUFFER_TOO_SMALL = -2,
+  USAGI_EXCEPTION = -3
+};
 
 /* create and destroy a VM */
 UsagiVm *usagi_vm_create(void);
@@ -58,6 +63,9 @@ jint usagi_call_method(const UsagiObject *class_object,
 
 /* test only: usagi/Test.add(II)I */
 jint usagi_test_register_add(UsagiVm *vm);
+
+/* test only: usagi/Test.fail()I, always throws */
+jint usagi_test_register_fail(UsagiVm *vm);
 
 /* error from the last failed call on this thread */
 const char *usagi_last_error(void);
