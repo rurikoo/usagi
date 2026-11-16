@@ -61,11 +61,21 @@ jint usagi_call_method(const UsagiObject *class_object,
                        jvalue *out_value, int out_object_kind,
                        UsagiObject **out_object);
 
-/* test only: usagi/Test.add(II)I */
-jint usagi_test_register_add(UsagiVm *vm);
+/* Rust callback receiving primitive arguments and writing the return value */
+typedef jint (*UsagiMethodCallback)(void *user_data, const jvalue *args,
+                                    jvalue *out_value);
 
-/* test only: usagi/Test.fail()I, always throws */
-jint usagi_test_register_fail(UsagiVm *vm);
+/* frees user_data; called when the method is replaced or the VM is destroyed */
+typedef void (*UsagiMethodDrop)(void *user_data);
+
+/* registers or replaces a method; takes ownership of user_data on every path */
+jint usagi_class_register_method(UsagiObject *class_object, const char *name,
+                                 const char *signature, int is_static,
+                                 void *user_data, UsagiMethodCallback callback,
+                                 UsagiMethodDrop drop);
+
+/* sets the thread-local native error message, used by Rust callbacks */
+void usagi_set_error(const char *message);
 
 /* error from the last failed call on this thread */
 const char *usagi_last_error(void);

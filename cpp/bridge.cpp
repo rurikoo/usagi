@@ -9,10 +9,12 @@
 
 #include <jnivm.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <exception>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 struct UsagiVm {
@@ -168,76 +170,97 @@ bool valid_object(const UsagiObject *object) noexcept {
 } // namespace
 
 namespace {
-// hooked as usagi/Test.add(II)I
-jint usagi_test_add(JNIEnv *, jclass, jint a, jint b) { return a + b; }
 
-// hooked as usagi/Test.fail()I, always throws
-jint usagi_test_fail(JNIEnv *env, jclass) {
-  jclass type = env->FindClass("java/lang/RuntimeException"); // java/laugh/Cry
+template <class T> T jvalue_value(const jvalue &value);
 
-  if (type) {
-    env->ThrowNew(type, "usagi test failure");
+template <> jboolean jvalue_value<jboolean>(const jvalue &value) {
+  return value.z;
+}
+template <> jbyte jvalue_value<jbyte>(const jvalue &value) { return value.b; }
+template <> jchar jvalue_value<jchar>(const jvalue &value) { return value.c; }
+template <> jshort jvalue_value<jshort>(const jvalue &value) { return value.s; }
+template <> jint jvalue_value<jint>(const jvalue &value) { return value.i; }
+template <> jlong jvalue_value<jlong>(const jvalue &value) { return value.j; }
+template <> jfloat jvalue_value<jfloat>(const jvalue &value) { return value.f; }
+template <> jdouble jvalue_value<jdouble>(const jvalue &value) {
+  return value.d;
+}
+template <> jobject jvalue_value<jobject>(const jvalue &value) {
+  return value.l;
+}
+template <> void jvalue_value<void>(const jvalue &) {}
+
+class UsagiMethodHandle : public jnivm::MethodHandle {
+public:
+  UsagiMethodHandle(void *user_data, UsagiMethodCallback callback,
+                    UsagiMethodDrop drop)
+      : user_data_(user_data), callback_(callback), drop_(drop) {}
+
+  ~UsagiMethodHandle() {
+    if (drop_) {
+      drop_(user_data_);
+    }
   }
 
-  return 0;
-}
-
-template <class F>
-jint register_test_method(UsagiVm *vm, const char *name, F fn) {
-  clear_error();
-
-  try {
-    if (!valid_vm(vm)) {
-      return USAGI_ERROR;
-    }
-
-    JNIEnv *env = current_env(vm);
-
-    if (!env) {
-      return USAGI_ERROR;
-    }
-
-    jclass local = env->FindClass("usagi/Test");
-
-    if (!local) {
-      set_error("FindClass returned null for usagi/Test");
-      return USAGI_ERROR;
-    }
-
-    LocalRefGuard guard{env, local};
-
-    auto *jenv = jnivm::ENV::FromJNIEnv(env);
-    std::shared_ptr<jnivm::Class> cl = jenv->GetClass("usagi/Test");
-
-    if (!cl) {
-      set_error("jnivm could not provide usagi/Test");
-      return USAGI_ERROR;
-    }
-
-    cl->Hook(jenv, name, std::move(fn));
-
-    clear_error();
-    return USAGI_OK;
-  } catch (const std::exception &e) {
-    set_error(e.what());
-  } catch (...) {
-    set_error("unexpected exception registering test method");
+#define USAGI_DEFINE_INVOKE(type)                                             \
+  type StaticInvoke(jnivm::ENV *, jnivm::Class *, const jvalue *values,        \
+                    jnivm::impl::MethodHandleBase<type>) override {            \
+    return invoke<type>(values);                                               \
+  }                                                                            \
+  type InstanceInvoke(jnivm::ENV *, jobject, const jvalue *values,             \
+                      jnivm::impl::MethodHandleBase<type>) override {          \
+    return invoke<type>(values);                                               \
   }
 
-  return USAGI_ERROR;
-}
+  USAGI_DEFINE_INVOKE(jobject)
+  USAGI_DEFINE_INVOKE(jboolean)
+  USAGI_DEFINE_INVOKE(jbyte)
+  USAGI_DEFINE_INVOKE(jchar)
+  USAGI_DEFINE_INVOKE(jshort)
+  USAGI_DEFINE_INVOKE(jint)
+  USAGI_DEFINE_INVOKE(jlong)
+  USAGI_DEFINE_INVOKE(jfloat)
+  USAGI_DEFINE_INVOKE(jdouble)
+  USAGI_DEFINE_INVOKE(void)
+
+#undef USAGI_DEFINE_INVOKE
+
+private:
+  template <class T> T invoke(const jvalue *values) {
+    jvalue out{};
+
+    if (callback_(user_data_, values, &out) != USAGI_OK) {
+      throw std::runtime_error(last_error.empty() ? "usagi method callback failed"
+                                                  : last_error);
+    }
+
+    return jvalue_value<T>(out);
+  }
+
+  void *user_data_;
+  UsagiMethodCallback callback_;
+  UsagiMethodDrop drop_;
+};
+
+struct CallbackOwner {
+  void *data;
+  UsagiMethodDrop drop;
+  bool released = false;
+
+  ~CallbackOwner() {
+    if (!released && drop) {
+      drop(data);
+    }
+  }
+
+  void release() { released = true; }
+};
+
 } // namespace
 
 extern "C" {
 
-/// replaced dis with easier and shorter func
-jint usagi_test_register_add(UsagiVm *vm) {
-  return register_test_method(vm, "add", &usagi_test_add);
-}
-
-jint usagi_test_register_fail(UsagiVm *vm) {
-  return register_test_method(vm, "fail", &usagi_test_fail);
-}
+void usagi_set_error(const char *message) { set_error(message); }
 
 const char *usagi_last_error(void) { return last_error.c_str(); }
 
@@ -495,6 +518,90 @@ void *usagi_class_get_method(const UsagiObject *class_object, const char *name,
   return nullptr;
 }
 
+jint usagi_class_register_method(UsagiObject *class_object, const char *name,
+                                 const char *signature, int is_static,
+                                 void *user_data, UsagiMethodCallback callback,
+                                 UsagiMethodDrop drop) {
+  clear_error();
+
+  if (!callback) {
+    if (drop) {
+      drop(user_data);
+    }
+    set_error("null method callback");
+    return USAGI_ERROR;
+  }
+
+  // consumes user_data whether registration succeeds or fails
+  CallbackOwner owner{user_data, drop};
+
+  try {
+    if (!valid_object(class_object)) {
+      return USAGI_ERROR;
+    }
+
+    if (class_object->kind != UsagiObjectKind::Class) {
+      set_error("object is not a Java class");
+      return USAGI_ERROR;
+    }
+
+    if (!name || name[0] == '\0' || !signature || signature[0] == '\0') {
+      set_error("invalid method name or signature");
+      return USAGI_ERROR;
+    }
+
+    JNIEnv *env = current_env(class_object->owner);
+
+    if (!env) {
+      return USAGI_ERROR;
+    }
+
+    auto *jenv = jnivm::ENV::FromJNIEnv(env);
+    std::shared_ptr<jnivm::Class> cl =
+        jnivm::JNITypes<std::shared_ptr<jnivm::Class>>::JNICast(
+            jenv, static_cast<jclass>(class_object->global_ref));
+
+    if (!cl) {
+      set_error("jnivm could not provide the Java class");
+      return USAGI_ERROR;
+    }
+
+    auto method = std::make_shared<jnivm::Method>();
+    method->name = name;
+    method->signature = signature;
+    method->_static = is_static != 0;
+    method->native = nullptr;
+    method->nativehandle =
+        std::make_shared<UsagiMethodHandle>(user_data, callback, drop);
+    owner.release();
+
+    std::lock_guard<std::mutex> lock(cl->mtx);
+    auto existing = std::find_if(
+        cl->methods.begin(), cl->methods.end(),
+        [&method](const std::shared_ptr<jnivm::Method> &candidate) {
+          return candidate->_static == method->_static &&
+                 candidate->name == method->name &&
+                 candidate->signature == method->signature;
+        });
+
+    if (existing != cl->methods.end()) {
+      (*existing)->nativehandle = method->nativehandle;
+      (*existing)->native = nullptr;
+    } else {
+      cl->methods.push_back(method);
+    }
+
+    clear_error();
+    return USAGI_OK;
+  } catch (const std::exception &e) {
+    set_error(e.what());
+  } catch (...) {
+    set_error("unexpected exception registering method");
+  }
+
+  return USAGI_ERROR;
+}
+
 jint usagi_call_method(const UsagiObject *class_object,
                        const UsagiObject *receiver, void *method_id,
                        int is_static, char return_kind, jvalue *args,
@@ -623,7 +730,10 @@ jint usagi_call_method(const UsagiObject *class_object,
 
     if (threw || pending) {
       out_value->j = 0;
-      set_error(what.empty() ? "java method threw an exception" : what.c_str());
+      // the callback already recorded its message in last_error
+      if (!what.empty() || last_error.empty()) {
+        set_error(what.empty() ? "java method threw an exception" : what.c_str());
+      }
       return USAGI_EXCEPTION;
     }
 

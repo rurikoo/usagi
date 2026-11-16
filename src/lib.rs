@@ -1,3 +1,4 @@
+mod callback;
 mod class;
 mod error;
 mod ffi;
@@ -10,7 +11,7 @@ mod vm;
 
 pub use class::Class;
 pub use error::Error;
-pub use method::Method;
+pub use method::{Method, Output};
 pub use object::Object;
 pub use string::JavaString;
 pub use vm::Vm;

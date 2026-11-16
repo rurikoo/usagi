@@ -186,16 +186,24 @@ fn return_code(ty: &Type) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ffi;
 
     fn register_add(vm: &Vm) {
-        let status = unsafe { ffi::usagi_test_register_add(vm.raw_ptr()) };
-        assert_eq!(status, ffi::USAGI_OK);
+        vm.define_class("usagi/Test")
+            .unwrap()
+            .register_static_method("add", "(II)I", |args| match args {
+                [Value::Int(a), Value::Int(b)] => Ok(Value::Int(a + b)),
+                _ => Err(Error::new("callback", "unexpected arguments")),
+            })
+            .unwrap();
     }
 
     fn register_fail(vm: &Vm) {
-        let status = unsafe { ffi::usagi_test_register_fail(vm.raw_ptr()) };
-        assert_eq!(status, ffi::USAGI_OK);
+        vm.define_class("usagi/Test")
+            .unwrap()
+            .register_static_method("fail", "()I", |_| -> Result<Value, Error> {
+                Err(Error::new("callback", "usagi test failure"))
+            })
+            .unwrap();
     }
 
     #[test]
@@ -249,6 +257,63 @@ mod tests {
 
         let error = fail.call(None, &[]).map(|_| ()).unwrap_err();
         assert_eq!(error.operation(), "java exception");
+        assert!(
+            error.message().contains("usagi test failure"),
+            "{}",
+            error.message()
+        );
+    }
+
+    #[test]
+    fn callback_panic_becomes_an_error_and_calls_continue() {
+        let vm = Vm::new().unwrap();
+        register_add(&vm);
+
+        vm.define_class("usagi/Test")
+            .unwrap()
+            .register_static_method("panic", "()I", |_| -> Result<Value, Error> {
+                panic!("callback exploded")
+            })
+            .unwrap();
+
+        let class = vm.find_class("usagi/Test").unwrap();
+        let panic = class.static_method("panic", "()I").unwrap();
+        let add = class.static_method("add", "(II)I").unwrap();
+
+        let error = panic.call(None, &[]).map(|_| ()).unwrap_err();
+        assert_eq!(error.operation(), "java exception");
+        assert!(
+            error.message().contains("callback exploded"),
+            "{}",
+            error.message()
+        );
+
+        match add.call(None, &[Value::Int(3), Value::Int(4)]).unwrap() {
+            Output::Int(sum) => assert_eq!(sum, 7),
+            _ => panic!("add should return an int"),
+        }
+    }
+
+    #[test]
+    fn registering_the_same_method_replaces_the_callback() {
+        let vm = Vm::new().unwrap();
+        register_add(&vm);
+
+        vm.define_class("usagi/Test")
+            .unwrap()
+            .register_static_method("add", "(II)I", |args| match args {
+                [Value::Int(a), Value::Int(b)] => Ok(Value::Int(a - b)),
+                _ => Err(Error::new("callback", "unexpected arguments")),
+            })
+            .unwrap();
+
+        let class = vm.find_class("usagi/Test").unwrap();
+        let add = class.static_method("add", "(II)I").unwrap();
+
+        match add.call(None, &[Value::Int(3), Value::Int(4)]).unwrap() {
+            Output::Int(difference) => assert_eq!(difference, -1),
+            _ => panic!("add should return an int"),
+        }
     }
 
     #[test]

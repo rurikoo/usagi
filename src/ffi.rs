@@ -20,6 +20,14 @@ pub const USAGI_ERROR: Jint = -1;
 pub const USAGI_BUFFER_TOO_SMALL: Jint = -2;
 pub const USAGI_EXCEPTION: Jint = -3;
 
+pub type MethodCallback = unsafe extern "C" fn(
+    user_data: *mut c_void,
+    args: *const jvalue,
+    out_value: *mut jvalue,
+) -> Jint;
+
+pub type MethodDrop = unsafe extern "C" fn(user_data: *mut c_void);
+
 #[repr(C)]
 pub struct UsagiVm {
     _data: [u8; 0],
@@ -71,6 +79,18 @@ unsafe extern "C" {
         is_static: c_int,
     ) -> *mut c_void;
 
+    pub fn usagi_class_register_method(
+        class_object: *mut UsagiObject,
+        name: *const c_char,
+        signature: *const c_char,
+        is_static: c_int,
+        user_data: *mut c_void,
+        callback: Option<MethodCallback>,
+        drop: Option<MethodDrop>,
+    ) -> Jint;
+
+    pub fn usagi_set_error(message: *const c_char);
+
     pub fn usagi_call_method(
         class_object: *const UsagiObject,
         receiver: *const UsagiObject,
@@ -82,9 +102,6 @@ unsafe extern "C" {
         out_object_kind: c_int,
         out_object: *mut *mut UsagiObject,
     ) -> Jint;
-
-    pub fn usagi_test_register_add(vm: *mut UsagiVm) -> Jint;
-    pub fn usagi_test_register_fail(vm: *mut UsagiVm) -> Jint;
 
     pub fn usagi_last_error() -> *const c_char;
 }

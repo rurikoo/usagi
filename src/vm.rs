@@ -67,6 +67,11 @@ impl Vm {
         Ok(())
     }
 
+    /// defines a class; libjnivm creates unknown classes on demand
+    pub fn define_class(&self, internal_name: &str) -> Result<Class<'_>, Error> {
+        self.find_class(internal_name)
+    }
+
     /// looks up a class using its JVM internal name, for example "java/lang/String"
     pub fn find_class(&self, internal_name: &str) -> Result<Class<'_>, Error> {
         if internal_name.is_empty() || internal_name.contains('\0') {
@@ -125,11 +130,6 @@ impl Vm {
         }
 
         Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn raw_ptr(&self) -> *mut ffi::UsagiVm {
-        self.raw.as_ptr()
     }
 }
 

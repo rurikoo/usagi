@@ -28,7 +28,7 @@ impl Error {
         }
     }
 
-    pub(crate) fn new(operation: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(operation: &'static str, message: impl Into<String>) -> Self {
         Self {
             operation,
             message: message.into(),
