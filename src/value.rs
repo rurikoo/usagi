@@ -2,6 +2,7 @@ use crate::{error::Error, sig::Type};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
+    Void,
     Boolean(bool),
     Byte(i8),
     Char(u16),
@@ -17,6 +18,7 @@ pub enum Value {
 impl Value {
     pub fn name(&self) -> &'static str {
         match self {
+            Value::Void => "void",
             Value::Boolean(_) => "boolean",
             Value::Byte(_) => "byte",
             Value::Char(_) => "char",
@@ -143,6 +145,8 @@ mod tests {
     #[test]
     fn void_never_fits() {
         assert!(!fits(&Value::Int(1), &Type::Void));
+        assert!(!fits(&Value::Void, &Type::Void));
+        assert!(!fits(&Value::Void, &Type::Int));
     }
 
     #[test]

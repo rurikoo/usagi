@@ -12,7 +12,11 @@ set(JNIVM_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/libjnivm)
 
 add_library(usagi_bridge STATIC
-    cpp/bridge.cpp
+    cpp/error.cpp
+    cpp/vm.cpp
+    cpp/object.cpp
+    cpp/registry.cpp
+    cpp/call.cpp
 )
 
 set_target_properties(usagi_bridge PROPERTIES
@@ -23,6 +27,11 @@ set_target_properties(usagi_bridge PROPERTIES
 target_include_directories(usagi_bridge
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
+
+find_package(JNI QUIET)
+if(JNI_FOUND)
+    target_include_directories(usagi_bridge PRIVATE ${JNI_INCLUDE_DIRS})
+endif()
 
 target_link_libraries(usagi_bridge
     PUBLIC jnivm

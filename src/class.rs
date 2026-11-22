@@ -1,35 +1,56 @@
-use std::{ffi::c_int, ptr::NonNull};
+use std::{
+    ffi::{c_char, c_int},
+    marker::PhantomData,
+    ptr::NonNull,
+    sync::Arc,
+};
 
 use crate::{
     callback,
     error::Error,
     ffi,
-    method::Method,
-    object::Object,
+    method::{Method, return_code},
+    object::{GlobalRef, Object},
     sig::{Signature, Type},
     value::Value,
     vm::encode_modified_utf8,
 };
 
-pub struct Class<'vm> {
-    object: Object<'vm>,
+pub struct Class<'env> {
+    object: Object<'env>,
 }
 
-impl<'vm> Class<'vm> {
-    pub(crate) fn from_object(object: Object<'vm>) -> Self {
+impl<'env> Class<'env> {
+    pub(crate) fn from_object(object: Object<'env>) -> Self {
         Self { object }
     }
 
     /// the underlying object handle
-    pub fn as_object(&self) -> &Object<'vm> {
+    pub fn as_object(&self) -> &Object<'env> {
         &self.object
     }
 
-    pub fn method(&self, name: &str, signature: &str) -> Result<Method<'_>, Error> {
+    pub fn to_global(&self) -> GlobalRef {
+        self.object.to_global()
+    }
+
+    pub fn into_global(self) -> GlobalRef {
+        self.object.into_global()
+    }
+
+    pub fn method<'class>(
+        &'class self,
+        name: &str,
+        signature: &str,
+    ) -> Result<Method<'class, 'env>, Error> {
         self.lookup(name, signature, false)
     }
 
-    pub fn static_method(&self, name: &str, signature: &str) -> Result<Method<'_>, Error> {
+    pub fn static_method<'class>(
+        &'class self,
+        name: &str,
+        signature: &str,
+    ) -> Result<Method<'class, 'env>, Error> {
         self.lookup(name, signature, true)
     }
 
@@ -61,26 +82,26 @@ impl<'vm> Class<'vm> {
             }
         }
 
-        if !is_primitive(signature.ret()) {
+        let ret = signature.ret();
+        if !is_primitive(ret) && *ret != Type::Void {
             return Err(Error::new(
                 "method registration",
-                format!(
-                    "return type {} is not supported yet",
-                    signature.ret().name()
-                ),
+                format!("return type {} is not supported yet", ret.name()),
             ));
         }
 
+        let ret_kind = return_code(ret) as c_char;
         let name = encode_modified_utf8(name);
         let signature_text = encode_modified_utf8(signature.as_str());
         let user_data = callback::into_raw(signature, Box::new(handler));
 
         let status = unsafe {
             ffi::usagi_class_register_method(
-                self.object.raw.as_ptr(),
+                self.object.raw().as_ptr(),
                 name.as_ptr().cast(),
                 signature_text.as_ptr().cast(),
                 c_int::from(true),
+                ret_kind,
                 user_data,
                 Some(callback::trampoline),
                 Some(callback::drop_holder),
@@ -97,7 +118,12 @@ impl<'vm> Class<'vm> {
         Ok(())
     }
 
-    fn lookup(&self, name: &str, signature: &str, is_static: bool) -> Result<Method<'_>, Error> {
+    fn lookup<'class>(
+        &'class self,
+        name: &str,
+        signature: &str,
+        is_static: bool,
+    ) -> Result<Method<'class, 'env>, Error> {
         // parse first so invalid text never reaches C++!!
         let signature = Signature::parse(signature)?;
 
@@ -113,7 +139,7 @@ impl<'vm> Class<'vm> {
 
         let raw = unsafe {
             ffi::usagi_class_get_method(
-                self.object.raw.as_ptr(),
+                self.object.raw().as_ptr(),
                 name.as_ptr().cast(),
                 signature_text.as_ptr().cast(),
                 c_int::from(is_static),
@@ -127,8 +153,9 @@ impl<'vm> Class<'vm> {
             id,
             signature,
             is_static,
-            class: self.object.raw,
-            vm: self.object.vm(),
+            class: self.object.raw(),
+            vm: Arc::clone(self.object.vm_inner()),
+            _class: PhantomData,
         })
     }
 }
@@ -149,13 +176,14 @@ fn is_primitive(ty: &Type) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Error, Value, Vm};
+    use crate::{Error, Output, Value, Vm};
 
     #[test]
     fn registers_a_static_method() {
         let vm = Vm::new().expect("VM creation should succeed");
+        let env = vm.env().expect("JNI env");
 
-        let class = vm
+        let class = env
             .define_class("usagi/Test")
             .expect("usagi/Test should exist");
 
@@ -172,9 +200,24 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_primitive_signatures() {
+    fn registers_and_calls_void_static_method() {
         let vm = Vm::new().unwrap();
-        let class = vm.define_class("usagi/Test").unwrap();
+        let env = vm.env().unwrap();
+        let class = env.define_class("usagi/VoidTest").unwrap();
+
+        class
+            .register_static_method("noop", "()V", |_| Ok(Value::Void))
+            .expect("()V should register");
+
+        let noop = class.static_method("noop", "()V").unwrap();
+        assert!(matches!(noop.call(None, &[]).unwrap(), Output::Void));
+    }
+
+    #[test]
+    fn rejects_unsupported_reference_signatures() {
+        let vm = Vm::new().unwrap();
+        let env = vm.env().unwrap();
+        let class = env.define_class("usagi/Test").unwrap();
 
         fn handler(_: &[Value]) -> Result<Value, Error> {
             Ok(Value::Int(0))
@@ -186,6 +229,10 @@ mod tests {
                 .is_err()
         );
         assert!(class.register_static_method("b", "()[I", handler).is_err());
-        assert!(class.register_static_method("c", "()V", handler).is_err());
+        assert!(
+            class
+                .register_static_method("c", "()Ljava/lang/String;", handler)
+                .is_err()
+        );
     }
 }

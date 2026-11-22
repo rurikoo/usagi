@@ -1,31 +1,32 @@
 use std::{
     ffi::{c_char, c_int, c_void},
+    marker::PhantomData,
     ptr::NonNull,
+    sync::Arc,
 };
 
 use crate::{
+    class::Class,
     error::Error,
     ffi::{self, jvalue},
-    object::Object,
+    object::{Object, ObjectKind},
     sig::{Signature, Type},
     string::JavaString,
     value::{Value, check_args},
-    vm::Vm,
+    vm::VmInner,
 };
 
-const KIND_OBJECT: c_int = 0;
-const KIND_STRING: c_int = 2;
-
-pub struct Method<'class> {
+pub struct Method<'class, 'env> {
     pub(crate) id: NonNull<c_void>,
     pub(crate) signature: Signature,
     pub(crate) is_static: bool,
     pub(crate) class: NonNull<ffi::UsagiObject>,
-    pub(crate) vm: &'class Vm,
+    pub(crate) vm: Arc<VmInner>,
+    pub(crate) _class: PhantomData<&'class Class<'env>>,
 }
 
 /// the result of a call, typed by the method's return type
-pub enum Output<'vm> {
+pub enum Output<'env> {
     Void,
     Boolean(bool),
     Byte(i8),
@@ -36,12 +37,12 @@ pub enum Output<'vm> {
     Float(f32),
     Double(f64),
     /// a non-string object or array, None for null
-    Object(Option<Object<'vm>>),
+    Object(Option<Object<'env>>),
     /// a java string, None for null
-    String(Option<JavaString<'vm>>),
+    String(Option<JavaString<'env>>),
 }
 
-impl<'class> Method<'class> {
+impl<'class, 'env> Method<'class, 'env> {
     pub fn signature(&self) -> &Signature {
         &self.signature
     }
@@ -55,7 +56,7 @@ impl<'class> Method<'class> {
         &self,
         receiver: Option<&Object<'_>>,
         args: &[Value],
-    ) -> Result<Output<'class>, Error> {
+    ) -> Result<Output<'env>, Error> {
         // all argument checks happen before any native call
         check_args(args, self.signature.args())?;
 
@@ -71,21 +72,32 @@ impl<'class> Method<'class> {
                 ));
             }
             (false, Some(object)) => {
-                if !object.belongs_to(self.vm) {
+                if !object.belongs_to_inner(&self.vm) {
                     return Err(Error::new(
                         "method call",
                         "receiver belongs to a different vm",
                     ));
                 }
-                object.raw.as_ptr().cast_const()
+                object.raw().as_ptr().cast_const()
             }
         };
 
         let mut jargs: Vec<jvalue> = args.iter().map(to_jvalue).collect();
+        let args_ptr = if jargs.is_empty() {
+            std::ptr::null_mut()
+        } else {
+            jargs.as_mut_ptr()
+        };
+
         let ret = self.signature.ret();
-        let kind = match ret {
-            Type::Object(name) if name.as_str() == "java/lang/String" => KIND_STRING,
-            _ => KIND_OBJECT,
+        let (ffi_kind, obj_kind) = match ret {
+            Type::Object(name) if name.as_str() == "java/lang/String" => {
+                (ffi::USAGI_OBJECT_KIND_STRING, ObjectKind::String)
+            }
+            Type::Object(name) if name.as_str() == "java/lang/Class" => {
+                (ffi::USAGI_OBJECT_KIND_CLASS, ObjectKind::Class)
+            }
+            _ => (ffi::USAGI_OBJECT_KIND_OBJECT, ObjectKind::Object),
         };
 
         let mut value = jvalue { j: 0 };
@@ -98,9 +110,9 @@ impl<'class> Method<'class> {
                 self.id.as_ptr(),
                 c_int::from(self.is_static),
                 return_code(ret) as c_char,
-                jargs.as_mut_ptr(),
+                args_ptr,
                 &mut value,
-                kind,
+                ffi_kind,
                 &mut out_object,
             )
         };
@@ -114,12 +126,12 @@ impl<'class> Method<'class> {
             return Err(Error::from_native(operation, "java method call failed"));
         }
 
-        let object = self.reference(out_object)?;
+        let object = self.reference(out_object, obj_kind)?;
 
         Ok(unsafe {
             match ret {
                 Type::Void => Output::Void,
-                Type::Boolean => Output::Boolean(value.z),
+                Type::Boolean => Output::Boolean(value.b != 0),
                 Type::Byte => Output::Byte(value.b),
                 Type::Char => Output::Char(value.c),
                 Type::Short => Output::Short(value.s),
@@ -136,14 +148,19 @@ impl<'class> Method<'class> {
     }
 
     /// wraps a handle from the bridge, None when the java result was null
-    fn reference(&self, raw: *mut ffi::UsagiObject) -> Result<Option<Object<'class>>, Error> {
+    fn reference(
+        &self,
+        raw: *mut ffi::UsagiObject,
+        kind: ObjectKind,
+    ) -> Result<Option<Object<'env>>, Error> {
         if raw.is_null() {
             return Ok(None);
         }
 
         Object::from_raw(
-            self.vm,
+            Arc::clone(&self.vm),
             raw,
+            kind,
             "method call",
             "java method returned an invalid object",
         )
@@ -153,6 +170,7 @@ impl<'class> Method<'class> {
 
 fn to_jvalue(value: &Value) -> jvalue {
     match *value {
+        Value::Void => jvalue { j: 0 },
         Value::Boolean(v) => jvalue { z: v },
         Value::Byte(v) => jvalue { b: v },
         Value::Char(v) => jvalue { c: v },
@@ -168,7 +186,7 @@ fn to_jvalue(value: &Value) -> jvalue {
 }
 
 /// the jni type character for a return type, as the bridge expects it
-fn return_code(ty: &Type) -> u8 {
+pub(crate) fn return_code(ty: &Type) -> u8 {
     match ty {
         Type::Void => b'V',
         Type::Boolean => b'Z',
@@ -179,16 +197,18 @@ fn return_code(ty: &Type) -> u8 {
         Type::Long => b'J',
         Type::Float => b'F',
         Type::Double => b'D',
-        Type::Object(_) | Type::Array(_) => b'L',
+        Type::Object(_) => b'L',
+        Type::Array(_) => b'[',
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Env, Vm};
 
-    fn register_add(vm: &Vm) {
-        vm.define_class("usagi/Test")
+    fn register_add(env: &Env<'_>) {
+        env.define_class("usagi/Test")
             .unwrap()
             .register_static_method("add", "(II)I", |args| match args {
                 [Value::Int(a), Value::Int(b)] => Ok(Value::Int(a + b)),
@@ -197,8 +217,8 @@ mod tests {
             .unwrap();
     }
 
-    fn register_fail(vm: &Vm) {
-        vm.define_class("usagi/Test")
+    fn register_fail(env: &Env<'_>) {
+        env.define_class("usagi/Test")
             .unwrap()
             .register_static_method("fail", "()I", |_| -> Result<Value, Error> {
                 Err(Error::new("callback", "usagi test failure"))
@@ -209,9 +229,10 @@ mod tests {
     #[test]
     fn add_returns_the_sum_of_its_arguments() {
         let vm = Vm::new().unwrap();
-        register_add(&vm);
+        let env = vm.env().unwrap();
+        register_add(&env);
 
-        let class = vm.find_class("usagi/Test").unwrap();
+        let class = env.find_class("usagi/Test").unwrap();
         let add = class.static_method("add", "(II)I").unwrap();
 
         match add.call(None, &[Value::Int(3), Value::Int(4)]).unwrap() {
@@ -221,11 +242,27 @@ mod tests {
     }
 
     #[test]
+    fn call_output_can_outlive_temporary_class() {
+        let vm = Vm::new().unwrap();
+        let env = vm.env().unwrap();
+        register_add(&env);
+
+        let result: Output<'_> = {
+            let class = env.find_class("usagi/Test").unwrap();
+            let add = class.static_method("add", "(II)I").unwrap();
+            add.call(None, &[Value::Int(10), Value::Int(20)]).unwrap()
+        };
+
+        assert!(matches!(result, Output::Int(30)));
+    }
+
+    #[test]
     fn add_rejects_bad_arguments_before_calling_java() {
         let vm = Vm::new().unwrap();
-        register_add(&vm);
+        let env = vm.env().unwrap();
+        register_add(&env);
 
-        let class = vm.find_class("usagi/Test").unwrap();
+        let class = env.find_class("usagi/Test").unwrap();
         let add = class.static_method("add", "(II)I").unwrap();
 
         assert!(add.call(None, &[Value::Long(3), Value::Int(4)]).is_err());
@@ -235,14 +272,15 @@ mod tests {
     #[test]
     fn static_call_rejects_a_receiver() {
         let vm = Vm::new().unwrap();
-        register_add(&vm);
+        let env = vm.env().unwrap();
+        register_add(&env);
 
-        let class = vm.find_class("usagi/Test").unwrap();
+        let class = env.find_class("usagi/Test").unwrap();
         let add = class.static_method("add", "(II)I").unwrap();
-        let text = vm.new_string("x").unwrap();
+        let text = env.new_string("x").unwrap();
 
         assert!(
-            add.call(Some(text.object()), &[Value::Int(3), Value::Int(4)])
+            add.call(Some(text.as_object()), &[Value::Int(3), Value::Int(4)])
                 .is_err()
         );
     }
@@ -250,9 +288,10 @@ mod tests {
     #[test]
     fn thrown_exception_becomes_an_error() {
         let vm = Vm::new().unwrap();
-        register_fail(&vm);
+        let env = vm.env().unwrap();
+        register_fail(&env);
 
-        let class = vm.find_class("usagi/Test").unwrap();
+        let class = env.find_class("usagi/Test").unwrap();
         let fail = class.static_method("fail", "()I").unwrap();
 
         let error = fail.call(None, &[]).map(|_| ()).unwrap_err();
@@ -267,16 +306,17 @@ mod tests {
     #[test]
     fn callback_panic_becomes_an_error_and_calls_continue() {
         let vm = Vm::new().unwrap();
-        register_add(&vm);
+        let env = vm.env().unwrap();
+        register_add(&env);
 
-        vm.define_class("usagi/Test")
+        env.define_class("usagi/Test")
             .unwrap()
             .register_static_method("panic", "()I", |_| -> Result<Value, Error> {
                 panic!("callback exploded")
             })
             .unwrap();
 
-        let class = vm.find_class("usagi/Test").unwrap();
+        let class = env.find_class("usagi/Test").unwrap();
         let panic = class.static_method("panic", "()I").unwrap();
         let add = class.static_method("add", "(II)I").unwrap();
 
@@ -297,9 +337,10 @@ mod tests {
     #[test]
     fn registering_the_same_method_replaces_the_callback() {
         let vm = Vm::new().unwrap();
-        register_add(&vm);
+        let env = vm.env().unwrap();
+        register_add(&env);
 
-        vm.define_class("usagi/Test")
+        env.define_class("usagi/Test")
             .unwrap()
             .register_static_method("add", "(II)I", |args| match args {
                 [Value::Int(a), Value::Int(b)] => Ok(Value::Int(a - b)),
@@ -307,7 +348,7 @@ mod tests {
             })
             .unwrap();
 
-        let class = vm.find_class("usagi/Test").unwrap();
+        let class = env.find_class("usagi/Test").unwrap();
         let add = class.static_method("add", "(II)I").unwrap();
 
         match add.call(None, &[Value::Int(3), Value::Int(4)]).unwrap() {
@@ -319,10 +360,11 @@ mod tests {
     #[test]
     fn calls_work_after_an_exception() {
         let vm = Vm::new().unwrap();
-        register_add(&vm);
-        register_fail(&vm);
+        let env = vm.env().unwrap();
+        register_add(&env);
+        register_fail(&env);
 
-        let class = vm.find_class("usagi/Test").unwrap();
+        let class = env.find_class("usagi/Test").unwrap();
         let fail = class.static_method("fail", "()I").unwrap();
         let add = class.static_method("add", "(II)I").unwrap();
 

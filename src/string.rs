@@ -1,24 +1,35 @@
-use crate::{error::Error, ffi, object::Object};
+use crate::{
+    error::Error,
+    ffi,
+    object::{GlobalRef, Object},
+};
 
-pub struct JavaString<'vm> {
-    object: Object<'vm>,
+pub struct JavaString<'env> {
+    object: Object<'env>,
 }
 
-impl<'vm> JavaString<'vm> {
-    #[allow(dead_code)]
-    pub(crate) fn object(&self) -> &Object<'vm> {
+impl<'env> JavaString<'env> {
+    pub fn as_object(&self) -> &Object<'env> {
         &self.object
     }
 
-    pub(crate) fn from_object(object: Object<'vm>) -> Self {
+    pub fn to_global(&self) -> GlobalRef {
+        self.object.to_global()
+    }
+
+    pub fn into_global(self) -> GlobalRef {
+        self.object.into_global()
+    }
+
+    pub(crate) fn from_object(object: Object<'env>) -> Self {
         Self { object }
     }
 
-    pub fn to_string_lossy(&self) -> Result<String, Error> {
+    pub fn to_utf16(&self) -> Result<Vec<u16>, Error> {
         let mut length = 0usize;
 
         let status =
-            unsafe { ffi::usagi_string_utf16_length(self.object.raw.as_ptr(), &mut length) };
+            unsafe { ffi::usagi_string_utf16_length(self.object.raw().as_ptr(), &mut length) };
 
         if status != ffi::USAGI_OK {
             return Err(Error::from_native(
@@ -44,7 +55,7 @@ impl<'vm> JavaString<'vm> {
 
         let status = unsafe {
             ffi::usagi_string_copy_utf16(
-                self.object.raw.as_ptr(),
+                self.object.raw().as_ptr(),
                 buffer,
                 units.len(),
                 &mut actual_length,
@@ -65,6 +76,11 @@ impl<'vm> JavaString<'vm> {
             ));
         }
 
+        Ok(units)
+    }
+
+    pub fn to_string_lossy(&self) -> Result<String, Error> {
+        let units = self.to_utf16()?;
         Ok(String::from_utf16_lossy(&units))
     }
 }

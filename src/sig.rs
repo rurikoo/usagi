@@ -1,4 +1,5 @@
 use crate::error::Error;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Boolean,
@@ -88,13 +89,14 @@ impl Parser<'_> {
                 }
 
                 let name = std::str::from_utf8(&self.bytes[start..start + offset])
-                    .map_err(|_| err("class name is not valid utf-8"))?
-                    .to_owned();
+                    .map_err(|_| err("class name is not valid utf-8"))?;
+
+                validate_internal_class_name(name, start)?;
 
                 // move past the ';'
                 self.pos = start + offset + 1;
 
-                Ok(Type::Object(name))
+                Ok(Type::Object(name.to_owned()))
             }
             Some(b'[') => {
                 if depth >= 255 {
@@ -115,6 +117,22 @@ impl Parser<'_> {
             None => Err(err("unexpected end of signature")),
         }
     }
+}
+
+fn validate_internal_class_name(name: &str, start: usize) -> Result<(), Error> {
+    if name.starts_with('/') || name.ends_with('/') || name.contains("//") {
+        return Err(err(format!(
+            "invalid slash placement in class name at position {start}"
+        )));
+    }
+
+    if let Some(bad) = name.chars().find(|&c| matches!(c, '\0' | '.' | '[')) {
+        return Err(err(format!(
+            "invalid character {bad:?} in class name at position {start}"
+        )));
+    }
+
+    Ok(())
 }
 
 fn err(message: impl Into<String>) -> Error {
@@ -257,7 +275,6 @@ mod tests {
 
     #[test]
     fn continues_after_object_type() {
-        // proves the cursor moved past the ';'
         let sig = parse_ok("(Ljava/lang/String;I)Z");
         assert_eq!(sig.args, vec![obj("java/lang/String"), Type::Int]);
         assert_eq!(sig.ret, Type::Boolean);
@@ -271,7 +288,6 @@ mod tests {
 
     #[test]
     fn class_names_containing_type_letters_are_not_misread() {
-        // 'L', 'J', 'I' and so on inside the name must not count as types
         let sig = parse_ok("(Ljava/lang/Long;)Ljava/lang/Integer;");
         assert_eq!(sig.args, vec![obj("java/lang/Long")]);
         assert_eq!(sig.ret, obj("java/lang/Integer"));
@@ -355,7 +371,7 @@ mod tests {
     fn rejects_unknown_type_codes() {
         parse_err("(Q)V", "unknown type code");
         parse_err("()Q", "unknown type code");
-        parse_err("(i)V", "unknown type code"); // codes are case sensitive
+        parse_err("(i)V", "unknown type code");
     }
 
     #[test]
@@ -374,6 +390,16 @@ mod tests {
     #[test]
     fn rejects_empty_class_name() {
         parse_err("(L;)V", "empty class name");
+    }
+
+    #[test]
+    fn rejects_invalid_class_names() {
+        parse_err("(Ljava.lang.String;)V", "invalid character");
+        parse_err("(L[I;)V", "invalid character");
+        parse_err("(Lfoo\0bar;)V", "invalid character");
+        parse_err("(L/java/lang/String;)V", "invalid slash");
+        parse_err("(Ljava/lang/String/;)V", "invalid slash");
+        parse_err("(Ljava//lang/String;)V", "invalid slash");
     }
 
     #[test]

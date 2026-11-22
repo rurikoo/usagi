@@ -31,12 +31,23 @@ pub(crate) unsafe extern "C" fn trampoline(
     args: *const jvalue,
     out_value: *mut jvalue,
 ) -> ffi::Jint {
+    if user_data.is_null() {
+        return fail(Error::new("callback", "null callback user_data"));
+    }
+
     let result = catch_unwind(AssertUnwindSafe(|| -> Result<(), Error> {
         let holder = unsafe { &*user_data.cast::<Holder>() };
+        let expected_args = holder.signature.args();
 
-        let values = holder
-            .signature
-            .args()
+        if !expected_args.is_empty() && args.is_null() {
+            return Err(Error::new("callback", "null arguments pointer"));
+        }
+
+        if *holder.signature.ret() != Type::Void && out_value.is_null() {
+            return Err(Error::new("callback", "null return output pointer"));
+        }
+
+        let values = expected_args
             .iter()
             .enumerate()
             .map(|(index, ty)| unsafe { read_arg(*args.add(index), ty) })
@@ -58,13 +69,15 @@ pub(crate) unsafe extern "C" fn trampoline(
 
 pub(crate) unsafe extern "C" fn drop_holder(user_data: *mut c_void) {
     if !user_data.is_null() {
-        drop(unsafe { Box::from_raw(user_data.cast::<Holder>()) });
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            drop(unsafe { Box::from_raw(user_data.cast::<Holder>()) });
+        }));
     }
 }
 
 unsafe fn read_arg(value: jvalue, ty: &Type) -> Value {
     match ty {
-        Type::Boolean => Value::Boolean(unsafe { value.z }),
+        Type::Boolean => Value::Boolean(unsafe { value.b != 0 }),
         Type::Byte => Value::Byte(unsafe { value.b }),
         Type::Char => Value::Char(unsafe { value.c }),
         Type::Short => Value::Short(unsafe { value.s }),
@@ -79,6 +92,7 @@ unsafe fn read_arg(value: jvalue, ty: &Type) -> Value {
 
 unsafe fn write_return(ret: &Type, value: Value, out: *mut jvalue) -> Result<(), Error> {
     match (ret, value) {
+        (Type::Void, Value::Void) => {}
         (Type::Boolean, Value::Boolean(value)) => unsafe { (*out).z = value },
         (Type::Byte, Value::Byte(value)) => unsafe { (*out).b = value },
         (Type::Char, Value::Char(value)) => unsafe { (*out).c = value },

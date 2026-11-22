@@ -19,6 +19,12 @@ enum {
   USAGI_EXCEPTION = -3
 };
 
+typedef enum UsagiObjectKind {
+  USAGI_OBJECT_KIND_OBJECT = 0,
+  USAGI_OBJECT_KIND_CLASS = 1,
+  USAGI_OBJECT_KIND_STRING = 2
+} UsagiObjectKind;
+
 /* create and destroy a VM */
 UsagiVm *usagi_vm_create(void);
 void usagi_vm_destroy(UsagiVm *vm);
@@ -27,8 +33,9 @@ void usagi_vm_destroy(UsagiVm *vm);
 JavaVM *usagi_vm_get_java_vm(UsagiVm *vm);
 JNIEnv *usagi_vm_get_jni_env(UsagiVm *vm);
 
-/* thread lifecycle */
-jint usagi_vm_attach_current_thread(UsagiVm *vm, JNIEnv **out_env);
+/* thread lifecycle; out_attached is set to 1 only if this call attached the thread */
+jint usagi_vm_attach_current_thread(UsagiVm *vm, JNIEnv **out_env,
+                                    int *out_attached);
 
 jint usagi_vm_detach_current_thread(UsagiVm *vm);
 
@@ -61,7 +68,7 @@ jint usagi_call_method(const UsagiObject *class_object,
                        jvalue *out_value, int out_object_kind,
                        UsagiObject **out_object);
 
-/* Rust callback receiving primitive arguments and writing the return value */
+/* Rust callback receiving arguments and writing the return value */
 typedef jint (*UsagiMethodCallback)(void *user_data, const jvalue *args,
                                     jvalue *out_value);
 
@@ -71,7 +78,8 @@ typedef void (*UsagiMethodDrop)(void *user_data);
 /* registers or replaces a method; takes ownership of user_data on every path */
 jint usagi_class_register_method(UsagiObject *class_object, const char *name,
                                  const char *signature, int is_static,
-                                 void *user_data, UsagiMethodCallback callback,
+                                 char return_kind, void *user_data,
+                                 UsagiMethodCallback callback,
                                  UsagiMethodDrop drop);
 
 /* sets the thread-local native error message, used by Rust callbacks */
