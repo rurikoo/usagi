@@ -16,7 +16,7 @@ fn registers_and_calls_a_static_method() {
     let class = env.define_class("usagi/Test").expect("class definition");
 
     class
-        .register_static_method("add", "(II)I", |args| match args {
+        .register_static_method("add", "(II)I", |_env, args| match args {
             [Value::Int(a), Value::Int(b)] => Ok(Value::Int(a + b)),
             _ => Err(Error::new("callback", "unexpected arguments")),
         })
@@ -45,7 +45,7 @@ fn registers_and_calls_void_static_method_with_side_effects() {
     let counter_cb = Arc::clone(&counter);
 
     class
-        .register_static_method("inc", "(I)V", move |args| match args {
+        .register_static_method("inc", "(I)V", move |_env, args| match args {
             [Value::Int(delta)] => {
                 counter_cb.fetch_add(*delta, Ordering::SeqCst);
                 Ok(Value::Void)
@@ -69,7 +69,7 @@ fn converts_every_primitive_argument() {
     let class = env.define_class("usagi/Mixed").expect("class definition");
 
     class
-        .register_static_method("mix", "(ZBCSIJFD)D", |args| match args {
+        .register_static_method("mix", "(ZBCSIJFD)D", |_env, args| match args {
             [
                 Value::Boolean(z),
                 Value::Byte(b),
@@ -122,7 +122,7 @@ fn callback_error_message_reaches_the_caller() {
     let class = env.define_class("usagi/Test").expect("class definition");
 
     class
-        .register_static_method("fail", "()I", |_| {
+        .register_static_method("fail", "()I", |_, _| {
             Err(Error::new("callback", "callback says no"))
         })
         .expect("fail()I should register");
@@ -148,13 +148,13 @@ fn raw_jni_caller_gets_pending_exception_without_cpp_unwind() {
     let class = env.define_class("usagi/RawJni").unwrap();
 
     class
-        .register_static_method("boom", "()I", |_| {
+        .register_static_method("boom", "()I", |_, _| {
             Err(Error::new("callback", "boom from rust"))
         })
         .unwrap();
 
     class
-        .register_static_method("isTrue", "(Z)Z", |args| match args {
+        .register_static_method("isTrue", "(Z)Z", |_env, args| match args {
             [Value::Boolean(v)] => Ok(Value::Boolean(*v)),
             _ => Err(Error::new("callback", "unexpected arguments")),
         })
@@ -211,14 +211,14 @@ fn panicking_drop_in_replaced_callback_does_not_abort() {
 
     let bomb = Bomb;
     class
-        .register_static_method("f", "()I", move |_| {
+        .register_static_method("f", "()I", move |_, _| {
             let _ = &bomb;
             Ok(Value::Int(1))
         })
         .unwrap();
 
     class
-        .register_static_method("f", "()I", |_| Ok(Value::Int(2)))
+        .register_static_method("f", "()I", |_, _| Ok(Value::Int(2)))
         .unwrap();
 
     let f = class.static_method("f", "()I").unwrap();
@@ -232,7 +232,7 @@ fn multi_threaded_calls_via_attach_guard() {
         let env = vm.env().unwrap();
         let class = env.define_class("usagi/Threaded").unwrap();
         class
-            .register_static_method("mul", "(II)I", |args| match args {
+            .register_static_method("mul", "(II)I", |_env, args| match args {
                 [Value::Int(a), Value::Int(b)] => Ok(Value::Int(a * b)),
                 _ => Err(Error::new("callback", "unexpected arguments")),
             })

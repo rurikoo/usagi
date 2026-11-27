@@ -101,6 +101,10 @@ impl Vm {
         Ok(())
     }
 
+    pub(crate) fn from_inner(inner: Arc<VmInner>) -> Self {
+        Self { inner }
+    }
+
     pub(crate) fn inner(&self) -> &Arc<VmInner> {
         &self.inner
     }

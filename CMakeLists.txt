@@ -15,6 +15,8 @@ add_library(usagi_bridge STATIC
     cpp/error.cpp
     cpp/vm.cpp
     cpp/object.cpp
+    cpp/array.cpp
+    cpp/bytebuffer.cpp
     cpp/registry.cpp
     cpp/call.cpp
 )

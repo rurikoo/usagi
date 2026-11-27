@@ -1,6 +1,7 @@
-use std::{marker::PhantomData, ptr::NonNull, rc::Rc, sync::Arc};
+use std::{fmt, marker::PhantomData, ptr::NonNull, rc::Rc, sync::Arc};
 
 use crate::{
+    array::{ArrayKind, JavaArray},
     class::Class,
     env::Env,
     error::Error,
@@ -14,6 +15,7 @@ pub(crate) enum ObjectKind {
     Object,
     Class,
     String,
+    Array(ArrayKind),
 }
 
 pub(crate) struct OwnedObject {
@@ -33,20 +35,39 @@ impl Drop for OwnedObject {
     }
 }
 
+#[derive(Clone)]
 pub struct Object<'env> {
     inner: Arc<OwnedObject>,
     _marker: PhantomData<(&'env (), Rc<()>)>,
+}
+
+impl fmt::Debug for Object<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Object")
+            .field("kind", &self.inner.kind)
+            .finish()
+    }
 }
 
 impl<'env> Object<'env> {
     pub(crate) fn from_raw(
         vm: Arc<VmInner>,
         raw: *mut ffi::UsagiObject,
-        kind: ObjectKind,
         operation: &'static str,
         fallback: &str,
     ) -> Result<Self, Error> {
         let raw = NonNull::new(raw).ok_or_else(|| Error::from_native(operation, fallback))?;
+        let kind = match unsafe { ffi::usagi_object_kind(raw.as_ptr()) } {
+            ffi::USAGI_OBJECT_KIND_CLASS => ObjectKind::Class,
+            ffi::USAGI_OBJECT_KIND_STRING => ObjectKind::String,
+            ffi::USAGI_OBJECT_KIND_ARRAY => {
+                let array_kind =
+                    ArrayKind::from_ffi(unsafe { ffi::usagi_object_array_kind(raw.as_ptr()) })
+                        .ok_or_else(|| Error::new(operation, "unknown java array kind"))?;
+                ObjectKind::Array(array_kind)
+            }
+            _ => ObjectKind::Object,
+        };
 
         Ok(Self {
             inner: Arc::new(OwnedObject { raw, vm, kind }),
@@ -65,6 +86,10 @@ impl<'env> Object<'env> {
         self.inner.raw
     }
 
+    pub(crate) fn kind(&self) -> ObjectKind {
+        self.inner.kind
+    }
+
     pub(crate) fn vm_inner(&self) -> &Arc<VmInner> {
         &self.inner.vm
     }
@@ -76,6 +101,27 @@ impl<'env> Object<'env> {
     /// true when this object belongs to vm
     pub fn belongs_to(&self, vm: &Vm) -> bool {
         vm.same_vm(&self.inner.vm)
+    }
+
+    pub fn into_string(self) -> Result<JavaString<'env>, Error> {
+        if self.inner.kind != ObjectKind::String {
+            return Err(Error::new("object cast", "object is not a java string"));
+        }
+        Ok(JavaString::from_object(self))
+    }
+
+    pub fn into_class(self) -> Result<Class<'env>, Error> {
+        if self.inner.kind != ObjectKind::Class {
+            return Err(Error::new("object cast", "object is not a java class"));
+        }
+        Ok(Class::from_object(self))
+    }
+
+    pub fn into_array(self) -> Result<JavaArray<'env>, Error> {
+        if !matches!(self.inner.kind, ObjectKind::Array(_)) {
+            return Err(Error::new("object cast", "object is not a java array"));
+        }
+        Ok(JavaArray::from_object(self))
     }
 
     /// promotes a clone of this handle to GlobalRef
@@ -136,6 +182,18 @@ impl GlobalRef {
         }
 
         Ok(JavaString::from_object(self.as_object(env)?))
+    }
+
+    /// binds this global reference as a JavaArray if it refers to a java array
+    pub fn as_array<'env>(&self, env: &'env Env<'_>) -> Result<JavaArray<'env>, Error> {
+        if !matches!(self.inner.kind, ObjectKind::Array(_)) {
+            return Err(Error::new(
+                "global reference",
+                "global reference is not a java array",
+            ));
+        }
+
+        Ok(JavaArray::from_object(self.as_object(env)?))
     }
 }
 

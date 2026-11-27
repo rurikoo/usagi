@@ -4,6 +4,7 @@ use crate::{
     object::{GlobalRef, Object},
 };
 
+#[derive(Debug, Clone)]
 pub struct JavaString<'env> {
     object: Object<'env>,
 }

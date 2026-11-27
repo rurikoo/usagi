@@ -36,7 +36,11 @@ bool valid_object(const UsagiObject *object) noexcept {
 
 bool valid_object_kind(int kind) noexcept {
   return kind == USAGI_OBJECT_KIND_OBJECT || kind == USAGI_OBJECT_KIND_CLASS ||
-         kind == USAGI_OBJECT_KIND_STRING;
+         kind == USAGI_OBJECT_KIND_STRING || kind == USAGI_OBJECT_KIND_ARRAY;
+}
+
+bool valid_primitive_array_kind(int kind) noexcept {
+  return kind >= USAGI_ARRAY_KIND_BOOLEAN && kind <= USAGI_ARRAY_KIND_DOUBLE;
 }
 
 bool take_exception(JNIEnv *env) noexcept {

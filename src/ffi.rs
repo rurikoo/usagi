@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-pub use jni_sys::{JNIEnv, JavaVM, jvalue};
+pub use jni_sys::{JNIEnv, JavaVM, jboolean, jlong, jobject, jvalue};
 use std::{
     ffi::{c_char, c_int, c_void},
     marker::{PhantomData, PhantomPinned},
@@ -12,6 +12,8 @@ pub type Jint = i32;
 
 pub const JNI_OK: Jint = 0;
 pub const JNI_ERR: Jint = -1;
+pub const JNI_COMMIT: Jint = 1;
+pub const JNI_ABORT: Jint = 2;
 
 pub const USAGI_OK: Jint = 0;
 pub const USAGI_ERROR: Jint = -1;
@@ -21,9 +23,22 @@ pub const USAGI_EXCEPTION: Jint = -3;
 pub const USAGI_OBJECT_KIND_OBJECT: c_int = 0;
 pub const USAGI_OBJECT_KIND_CLASS: c_int = 1;
 pub const USAGI_OBJECT_KIND_STRING: c_int = 2;
+pub const USAGI_OBJECT_KIND_ARRAY: c_int = 3;
+
+pub const USAGI_ARRAY_KIND_NONE: c_int = 0;
+pub const USAGI_ARRAY_KIND_BOOLEAN: c_int = 1;
+pub const USAGI_ARRAY_KIND_BYTE: c_int = 2;
+pub const USAGI_ARRAY_KIND_CHAR: c_int = 3;
+pub const USAGI_ARRAY_KIND_SHORT: c_int = 4;
+pub const USAGI_ARRAY_KIND_INT: c_int = 5;
+pub const USAGI_ARRAY_KIND_LONG: c_int = 6;
+pub const USAGI_ARRAY_KIND_FLOAT: c_int = 7;
+pub const USAGI_ARRAY_KIND_DOUBLE: c_int = 8;
+pub const USAGI_ARRAY_KIND_OBJECT: c_int = 9;
 
 pub type MethodCallback = unsafe extern "C" fn(
     user_data: *mut c_void,
+    env: *mut JNIEnv,
     args: *const jvalue,
     out_value: *mut jvalue,
 ) -> Jint;
@@ -68,6 +83,80 @@ unsafe extern "C" {
     ) -> *mut UsagiObject;
 
     pub fn usagi_object_destroy(object: *mut UsagiObject);
+
+    pub fn usagi_object_kind(object: *const UsagiObject) -> c_int;
+    pub fn usagi_object_array_kind(object: *const UsagiObject) -> c_int;
+    pub fn usagi_object_jobject(object: *const UsagiObject) -> jobject;
+    pub fn usagi_object_to_local_ref(env: *mut JNIEnv, object: *const UsagiObject) -> jobject;
+    pub fn usagi_wrap_jobject(
+        vm: *mut UsagiVm,
+        env: *mut JNIEnv,
+        ref_: jobject,
+        expected_kind: c_int,
+    ) -> *mut UsagiObject;
+
+    pub fn usagi_vm_new_primitive_array(
+        vm: *mut UsagiVm,
+        array_kind: c_int,
+        length: usize,
+    ) -> *mut UsagiObject;
+    pub fn usagi_vm_new_object_array(
+        vm: *mut UsagiVm,
+        length: usize,
+        element_class: *const UsagiObject,
+        init: *const UsagiObject,
+    ) -> *mut UsagiObject;
+    pub fn usagi_array_length(array: *const UsagiObject, out_length: *mut usize) -> Jint;
+    pub fn usagi_object_array_get(
+        array: *const UsagiObject,
+        index: usize,
+        out_element: *mut *mut UsagiObject,
+    ) -> Jint;
+    pub fn usagi_object_array_set(
+        array: *mut UsagiObject,
+        index: usize,
+        value: *const UsagiObject,
+    ) -> Jint;
+    pub fn usagi_array_get_region(
+        array: *const UsagiObject,
+        element_kind: c_int,
+        start: usize,
+        length: usize,
+        buffer: *mut c_void,
+    ) -> Jint;
+    pub fn usagi_array_set_region(
+        array: *mut UsagiObject,
+        element_kind: c_int,
+        start: usize,
+        length: usize,
+        buffer: *const c_void,
+    ) -> Jint;
+    pub fn usagi_array_get_elements(
+        array: *mut UsagiObject,
+        element_kind: c_int,
+        out_ptr: *mut *mut c_void,
+        out_is_copy: *mut jboolean,
+    ) -> Jint;
+    pub fn usagi_array_release_elements(
+        array: *mut UsagiObject,
+        element_kind: c_int,
+        ptr: *mut c_void,
+        mode: Jint,
+    ) -> Jint;
+
+    pub fn usagi_vm_new_direct_byte_buffer(
+        vm: *mut UsagiVm,
+        address: *mut c_void,
+        capacity: jlong,
+    ) -> *mut UsagiObject;
+    pub fn usagi_direct_buffer_address(
+        buffer: *const UsagiObject,
+        out_address: *mut *mut c_void,
+    ) -> Jint;
+    pub fn usagi_direct_buffer_capacity(
+        buffer: *const UsagiObject,
+        out_capacity: *mut jlong,
+    ) -> Jint;
 
     pub fn usagi_string_utf16_length(object: *const UsagiObject, out_length: *mut usize) -> Jint;
 

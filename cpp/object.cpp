@@ -4,15 +4,87 @@
 
 namespace usagi {
 
+namespace {
+
+UsagiArrayKind detect_array_kind(jnivm::Object *obj) noexcept {
+  if (dynamic_cast<jnivm::impl::Array<jboolean> *>(obj)) {
+    return USAGI_ARRAY_KIND_BOOLEAN;
+  }
+  if (dynamic_cast<jnivm::impl::Array<jbyte> *>(obj)) {
+    return USAGI_ARRAY_KIND_BYTE;
+  }
+  if (dynamic_cast<jnivm::impl::Array<jchar> *>(obj)) {
+    return USAGI_ARRAY_KIND_CHAR;
+  }
+  if (dynamic_cast<jnivm::impl::Array<jshort> *>(obj)) {
+    return USAGI_ARRAY_KIND_SHORT;
+  }
+  if (dynamic_cast<jnivm::impl::Array<jint> *>(obj)) {
+    return USAGI_ARRAY_KIND_INT;
+  }
+  if (dynamic_cast<jnivm::impl::Array<jlong> *>(obj)) {
+    return USAGI_ARRAY_KIND_LONG;
+  }
+  if (dynamic_cast<jnivm::impl::Array<jfloat> *>(obj)) {
+    return USAGI_ARRAY_KIND_FLOAT;
+  }
+  if (dynamic_cast<jnivm::impl::Array<jdouble> *>(obj)) {
+    return USAGI_ARRAY_KIND_DOUBLE;
+  }
+  if (dynamic_cast<jnivm::impl::Array<jnivm::Object> *>(obj)) {
+    return USAGI_ARRAY_KIND_OBJECT;
+  }
+  return USAGI_ARRAY_KIND_NONE;
+}
+
+} // namespace
+
 UsagiObject *make_object_handle(const std::shared_ptr<jnivm::VM> &vm,
-                                JNIEnv *env, jobject local_ref,
-                                UsagiObjectKind kind) {
-  if (!vm || !env || !local_ref) {
+                                JNIEnv *env, jobject ref,
+                                UsagiObjectKind expected_kind) {
+  if (!vm || !env || !ref) {
     set_error("invalid VM, JNI environment, or object reference");
     return nullptr;
   }
 
-  jobject global_ref = env->NewGlobalRef(local_ref);
+  auto *jenv = jnivm::ENV::FromJNIEnv(env);
+  std::shared_ptr<jnivm::Object> unpacked =
+      jnivm::JNITypes<std::shared_ptr<jnivm::Object>>::JNICast(jenv, ref);
+  if (!unpacked) {
+    set_error("null or invalid JNI object reference");
+    return nullptr;
+  }
+
+  UsagiObjectKind actual_kind = USAGI_OBJECT_KIND_OBJECT;
+  UsagiArrayKind array_kind = USAGI_ARRAY_KIND_NONE;
+
+  if (dynamic_cast<jnivm::Class *>(unpacked.get())) {
+    actual_kind = USAGI_OBJECT_KIND_CLASS;
+  } else if (dynamic_cast<jnivm::String *>(unpacked.get())) {
+    actual_kind = USAGI_OBJECT_KIND_STRING;
+  } else if (dynamic_cast<jnivm::impl::Array<void> *>(unpacked.get())) {
+    actual_kind = USAGI_OBJECT_KIND_ARRAY;
+    array_kind = detect_array_kind(unpacked.get());
+  }
+
+  if (expected_kind == USAGI_OBJECT_KIND_CLASS &&
+      actual_kind != USAGI_OBJECT_KIND_CLASS) {
+    set_error("object is not a java class");
+    return nullptr;
+  }
+  if (expected_kind == USAGI_OBJECT_KIND_STRING &&
+      actual_kind != USAGI_OBJECT_KIND_STRING) {
+    set_error("object is not a java/lang/String");
+    return nullptr;
+  }
+  if (expected_kind == USAGI_OBJECT_KIND_ARRAY &&
+      (actual_kind != USAGI_OBJECT_KIND_ARRAY ||
+       array_kind == USAGI_ARRAY_KIND_NONE)) {
+    set_error("object is not a java array");
+    return nullptr;
+  }
+
+  jobject global_ref = env->NewGlobalRef(ref);
   if (!global_ref) {
     take_exception(env);
     set_error("failed to create global JNI reference");
@@ -22,7 +94,8 @@ UsagiObject *make_object_handle(const std::shared_ptr<jnivm::VM> &vm,
   auto handle = std::make_unique<UsagiObject>();
   handle->owner = vm;
   handle->global_ref = global_ref;
-  handle->kind = kind;
+  handle->kind = actual_kind;
+  handle->array_kind = array_kind;
   return handle.release();
 }
 
@@ -113,6 +186,67 @@ void usagi_object_destroy(UsagiObject *object) {
   }
 
   delete object;
+}
+
+int usagi_object_kind(const UsagiObject *object) {
+  return object ? static_cast<int>(object->kind) : -1;
+}
+
+int usagi_object_array_kind(const UsagiObject *object) {
+  return object ? static_cast<int>(object->array_kind) : USAGI_ARRAY_KIND_NONE;
+}
+
+jobject usagi_object_jobject(const UsagiObject *object) {
+  return object ? object->global_ref : nullptr;
+}
+
+jobject usagi_object_to_local_ref(JNIEnv *env, const UsagiObject *object) {
+  return usagi::catch_to_ptr<struct _jobject>(
+      [&]() -> jobject {
+        if (!env || !usagi::valid_object(object)) {
+          if (!env) {
+            usagi::set_error("null JNIEnv");
+          }
+          return nullptr;
+        }
+
+        jobject local = env->NewLocalRef(object->global_ref);
+        if (!local) {
+          usagi::take_exception(env);
+          usagi::set_error("failed to create local JNI reference");
+          return nullptr;
+        }
+
+        usagi::clear_error();
+        return local;
+      },
+      "unexpected exception creating local JNI reference");
+}
+
+UsagiObject *usagi_wrap_jobject(UsagiVm *vm, JNIEnv *env, jobject ref,
+                                int expected_kind) {
+  return usagi::catch_to_ptr<UsagiObject>(
+      [&]() -> UsagiObject * {
+        if (!usagi::valid_vm(vm) || !env || !ref) {
+          if (usagi::valid_vm(vm) && (!env || !ref)) {
+            usagi::set_error("null JNIEnv or object reference");
+          }
+          return nullptr;
+        }
+
+        if (!usagi::valid_object_kind(expected_kind)) {
+          usagi::set_error("invalid object kind");
+          return nullptr;
+        }
+
+        UsagiObject *object = usagi::make_object_handle(
+            vm->inner, env, ref, static_cast<UsagiObjectKind>(expected_kind));
+        if (object) {
+          usagi::clear_error();
+        }
+        return object;
+      },
+      "unexpected exception wrapping JNI object");
 }
 
 jint usagi_string_utf16_length(const UsagiObject *object, size_t *out_length) {

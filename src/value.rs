@@ -1,7 +1,14 @@
-use crate::{error::Error, sig::Type};
+use crate::{
+    array::JavaArray,
+    class::Class,
+    error::Error,
+    object::{Object, ObjectKind},
+    sig::Type,
+    string::JavaString,
+};
 
-#[derive(Debug, Clone, Copy)]
-pub enum Value {
+#[derive(Debug, Clone)]
+pub enum Value<'env> {
     Void,
     Boolean(bool),
     Byte(i8),
@@ -11,11 +18,15 @@ pub enum Value {
     Long(i64),
     Float(f32),
     Double(f64),
+    Object(Object<'env>),
+    String(JavaString<'env>),
+    Class(Class<'env>),
+    Array(JavaArray<'env>),
     /// valid for any object or array param
     Null,
 }
 
-impl Value {
+impl<'env> Value<'env> {
     pub fn name(&self) -> &'static str {
         match self {
             Value::Void => "void",
@@ -27,7 +38,21 @@ impl Value {
             Value::Long(_) => "long",
             Value::Float(_) => "float",
             Value::Double(_) => "double",
+            Value::Object(_) => "object",
+            Value::String(_) => "string",
+            Value::Class(_) => "class",
+            Value::Array(_) => "array",
             Value::Null => "null",
+        }
+    }
+
+    pub(crate) fn as_object(&self) -> Option<&Object<'env>> {
+        match self {
+            Value::Object(object) => Some(object),
+            Value::String(string) => Some(string.as_object()),
+            Value::Class(class) => Some(class.as_object()),
+            Value::Array(array) => Some(array.as_object()),
+            _ => None,
         }
     }
 }
@@ -51,23 +76,54 @@ impl Type {
 }
 
 /// returns true when value passed where expected is declared
-fn fits(value: &Value, expected: &Type) -> bool {
-    matches!(
-        (value, expected),
+pub(crate) fn fits(value: &Value<'_>, expected: &Type) -> bool {
+    match (value, expected) {
         (Value::Boolean(_), Type::Boolean)
-            | (Value::Byte(_), Type::Byte)
-            | (Value::Char(_), Type::Char)
-            | (Value::Short(_), Type::Short)
-            | (Value::Int(_), Type::Int)
-            | (Value::Long(_), Type::Long)
-            | (Value::Float(_), Type::Float)
-            | (Value::Double(_), Type::Double)
-            | (Value::Null, Type::Object(_) | Type::Array(_))
-    )
+        | (Value::Byte(_), Type::Byte)
+        | (Value::Char(_), Type::Char)
+        | (Value::Short(_), Type::Short)
+        | (Value::Int(_), Type::Int)
+        | (Value::Long(_), Type::Long)
+        | (Value::Float(_), Type::Float)
+        | (Value::Double(_), Type::Double) => true,
+        (Value::Null, Type::Object(_) | Type::Array(_)) => true,
+        (Value::String(_), Type::Object(name)) => matches!(
+            name.as_str(),
+            "java/lang/String"
+                | "java/lang/Object"
+                | "java/lang/CharSequence"
+                | "java/io/Serializable"
+                | "java/lang/Comparable"
+        ),
+        (Value::Class(_), Type::Object(name)) => matches!(
+            name.as_str(),
+            "java/lang/Class"
+                | "java/lang/Object"
+                | "java/io/Serializable"
+                | "java/lang/reflect/Type"
+                | "java/lang/reflect/GenericDeclaration"
+                | "java/lang/reflect/AnnotatedElement"
+        ),
+        (Value::Array(array), Type::Array(element)) => array.kind().matches_type(element),
+        (Value::Array(_), Type::Object(name)) => matches!(
+            name.as_str(),
+            "java/lang/Object" | "java/lang/Cloneable" | "java/io/Serializable"
+        ),
+        (Value::Object(object), Type::Object(name)) => match name.as_str() {
+            "java/lang/String" => object.kind() == ObjectKind::String,
+            "java/lang/Class" => object.kind() == ObjectKind::Class,
+            _ => true,
+        },
+        (Value::Object(object), Type::Array(element)) => match object.kind() {
+            ObjectKind::Array(kind) => kind.matches_type(element),
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 /// checks that args can be passed to a method with params expected
-pub fn check_args(args: &[Value], expected: &[Type]) -> Result<(), Error> {
+pub fn check_args(args: &[Value<'_>], expected: &[Type]) -> Result<(), Error> {
     if args.len() != expected.len() {
         return Err(Error::new(
             "argument check",

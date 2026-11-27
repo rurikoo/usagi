@@ -188,17 +188,6 @@ jint usagi_call_method(const UsagiObject *class_object,
 
         if (result) {
           const auto kind = static_cast<UsagiObjectKind>(out_object_kind);
-
-          if (kind == USAGI_OBJECT_KIND_STRING) {
-            jclass string_cls = env->FindClass("java/lang/String");
-            usagi::LocalRefGuard str_guard{env, string_cls};
-            if (!string_cls || !env->IsInstanceOf(result, string_cls)) {
-              usagi::take_exception(env);
-              usagi::set_error("returned object is not a java/lang/String");
-              return USAGI_ERROR;
-            }
-          }
-
           UsagiObject *handle =
               usagi::make_object_handle(class_object->owner, env, result, kind);
           if (!handle) {

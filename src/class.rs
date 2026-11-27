@@ -7,15 +7,17 @@ use std::{
 
 use crate::{
     callback,
+    env::Env,
     error::Error,
     ffi,
     method::{Method, return_code},
     object::{GlobalRef, Object},
-    sig::{Signature, Type},
+    sig::Signature,
     value::Value,
     vm::encode_modified_utf8,
 };
 
+#[derive(Debug, Clone)]
 pub struct Class<'env> {
     object: Object<'env>,
 }
@@ -62,7 +64,10 @@ impl<'env> Class<'env> {
         handler: F,
     ) -> Result<(), Error>
     where
-        F: Fn(&[Value]) -> Result<Value, Error> + Send + Sync + 'static,
+        F: for<'a, 'vm> Fn(&'a mut Env<'vm>, &[Value<'a>]) -> Result<Value<'a>, Error>
+            + Send
+            + Sync
+            + 'static,
     {
         let signature = Signature::parse(signature)?;
 
@@ -73,27 +78,14 @@ impl<'env> Class<'env> {
             ));
         }
 
-        for ty in signature.args() {
-            if !is_primitive(ty) {
-                return Err(Error::new(
-                    "method registration",
-                    format!("argument type {} is not supported yet", ty.name()),
-                ));
-            }
-        }
-
-        let ret = signature.ret();
-        if !is_primitive(ret) && *ret != Type::Void {
-            return Err(Error::new(
-                "method registration",
-                format!("return type {} is not supported yet", ret.name()),
-            ));
-        }
-
-        let ret_kind = return_code(ret) as c_char;
+        let ret_kind = return_code(signature.ret()) as c_char;
         let name = encode_modified_utf8(name);
         let signature_text = encode_modified_utf8(signature.as_str());
-        let user_data = callback::into_raw(signature, Box::new(handler));
+        let user_data = callback::into_raw(
+            Arc::downgrade(self.object.vm_inner()),
+            signature,
+            Box::new(handler),
+        );
 
         let status = unsafe {
             ffi::usagi_class_register_method(
@@ -160,23 +152,9 @@ impl<'env> Class<'env> {
     }
 }
 
-fn is_primitive(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Boolean
-            | Type::Byte
-            | Type::Char
-            | Type::Short
-            | Type::Int
-            | Type::Long
-            | Type::Float
-            | Type::Double
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::{Error, Output, Value, Vm};
+    use crate::{Env, Error, Output, Value, Vm};
 
     #[test]
     fn registers_a_static_method() {
@@ -188,7 +166,7 @@ mod tests {
             .expect("usagi/Test should exist");
 
         class
-            .register_static_method("add", "(II)I", |args| match args {
+            .register_static_method("add", "(II)I", |_env, args| match args {
                 [Value::Int(a), Value::Int(b)] => Ok(Value::Int(a + b)),
                 _ => Err(Error::new("callback", "unexpected arguments")),
             })
@@ -206,7 +184,7 @@ mod tests {
         let class = env.define_class("usagi/VoidTest").unwrap();
 
         class
-            .register_static_method("noop", "()V", |_| Ok(Value::Void))
+            .register_static_method("noop", "()V", |_, _| Ok(Value::Void))
             .expect("()V should register");
 
         let noop = class.static_method("noop", "()V").unwrap();
@@ -214,25 +192,33 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_reference_signatures() {
+    fn supports_reference_signatures() {
         let vm = Vm::new().unwrap();
         let env = vm.env().unwrap();
         let class = env.define_class("usagi/Test").unwrap();
 
-        fn handler(_: &[Value]) -> Result<Value, Error> {
+        fn handler<'a>(_: &'a mut Env<'_>, _: &[Value<'a>]) -> Result<Value<'a>, Error> {
             Ok(Value::Int(0))
+        }
+
+        fn null_handler<'a>(_: &'a mut Env<'_>, _: &[Value<'a>]) -> Result<Value<'a>, Error> {
+            Ok(Value::Null)
         }
 
         assert!(
             class
                 .register_static_method("a", "(Ljava/lang/String;)I", handler)
-                .is_err()
+                .is_ok()
         );
-        assert!(class.register_static_method("b", "()[I", handler).is_err());
         assert!(
             class
-                .register_static_method("c", "()Ljava/lang/String;", handler)
-                .is_err()
+                .register_static_method("b", "()[I", null_handler)
+                .is_ok()
+        );
+        assert!(
+            class
+                .register_static_method("c", "()Ljava/lang/String;", null_handler)
+                .is_ok()
         );
     }
 }

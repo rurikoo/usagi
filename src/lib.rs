@@ -1,3 +1,4 @@
+mod array;
 mod callback;
 mod class;
 mod env;
@@ -10,6 +11,7 @@ mod string;
 mod value;
 mod vm;
 
+pub use array::{ArrayElement, ArrayElements, ArrayKind, JavaArray, PinElement};
 pub use class::Class;
 pub use env::{AttachGuard, Env};
 pub use error::Error;

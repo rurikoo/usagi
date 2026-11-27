@@ -165,8 +165,15 @@ private:
       return default_value<T>();
     }
 
+    JNIEnv *env = jenv ? jenv->GetJNIEnv() : nullptr;
+    if (!env) {
+      usagi::set_error("JNIEnv unavailable in callback");
+      throw_java_exception(jenv, usagi::current_error());
+      return default_value<T>();
+    }
+
     jvalue out{};
-    if (callback_(user_data_, values, &out) != USAGI_OK) {
+    if (callback_(user_data_, env, values, &out) != USAGI_OK) {
       if (usagi::current_error().empty()) {
         usagi::set_error("usagi method callback failed");
       }

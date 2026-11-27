@@ -139,6 +139,29 @@ fn err(message: impl Into<String>) -> Error {
     Error::new("signature parse", message)
 }
 
+impl Type {
+    pub fn parse(text: &str) -> Result<Self, Error> {
+        let mut parser = Parser {
+            bytes: text.as_bytes(),
+            pos: 0,
+        };
+
+        let ty = parser.parse_type(0)?;
+        if ty == Type::Void {
+            return Err(err("void is not a valid field type"));
+        }
+
+        if parser.pos != parser.bytes.len() {
+            return Err(err(format!(
+                "unexpected trailing data at position {}",
+                parser.pos
+            )));
+        }
+
+        Ok(ty)
+    }
+}
+
 impl Signature {
     pub fn args(&self) -> &[Type] {
         &self.args
@@ -428,5 +451,37 @@ mod tests {
     #[test]
     fn rejects_excessive_array_depth() {
         parse_err(&format!("({}I)V", "[".repeat(256)), "nesting");
+    }
+
+    #[test]
+    fn type_parse_parses_all_field_descriptors() {
+        assert_eq!(Type::parse("Z").unwrap(), Type::Boolean);
+        assert_eq!(Type::parse("B").unwrap(), Type::Byte);
+        assert_eq!(Type::parse("C").unwrap(), Type::Char);
+        assert_eq!(Type::parse("S").unwrap(), Type::Short);
+        assert_eq!(Type::parse("I").unwrap(), Type::Int);
+        assert_eq!(Type::parse("J").unwrap(), Type::Long);
+        assert_eq!(Type::parse("F").unwrap(), Type::Float);
+        assert_eq!(Type::parse("D").unwrap(), Type::Double);
+        assert_eq!(
+            Type::parse("Ljava/lang/String;").unwrap(),
+            obj("java/lang/String")
+        );
+        assert_eq!(Type::parse("[B").unwrap(), arr(Type::Byte));
+        assert_eq!(
+            Type::parse("[[Ljava/lang/String;").unwrap(),
+            arr(arr(obj("java/lang/String")))
+        );
+    }
+
+    #[test]
+    fn type_parse_rejects_invalid_descriptors() {
+        assert!(Type::parse("").is_err());
+        assert!(Type::parse("V").is_err());
+        assert!(Type::parse("[V").is_err());
+        assert!(Type::parse("II").is_err());
+        assert!(Type::parse("Ljava/lang/String;I").is_err());
+        assert!(Type::parse("Ljava.lang.String;").is_err());
+        assert!(Type::parse(&format!("{}I", "[".repeat(256))).is_err());
     }
 }

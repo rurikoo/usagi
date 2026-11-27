@@ -43,6 +43,8 @@ fn main() {
         manifest_dir.join("cpp/error.cpp"),
         manifest_dir.join("cpp/vm.cpp"),
         manifest_dir.join("cpp/object.cpp"),
+        manifest_dir.join("cpp/array.cpp"),
+        manifest_dir.join("cpp/bytebuffer.cpp"),
         manifest_dir.join("cpp/registry.cpp"),
         manifest_dir.join("cpp/call.cpp"),
         jnivm_dir.join("CMakeLists.txt"),

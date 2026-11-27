@@ -17,6 +17,7 @@ struct UsagiObject {
   std::shared_ptr<jnivm::VM> owner;
   jobject global_ref = nullptr;
   UsagiObjectKind kind = USAGI_OBJECT_KIND_OBJECT;
+  UsagiArrayKind array_kind = USAGI_ARRAY_KIND_NONE;
 };
 
 namespace usagi {
@@ -28,6 +29,7 @@ const std::string &current_error() noexcept;
 bool valid_vm(const UsagiVm *vm) noexcept;
 bool valid_object(const UsagiObject *object) noexcept;
 bool valid_object_kind(int kind) noexcept;
+bool valid_primitive_array_kind(int kind) noexcept;
 
 JNIEnv *current_env(const std::shared_ptr<jnivm::VM> &vm);
 JNIEnv *current_env(UsagiVm *vm);
@@ -35,8 +37,8 @@ JNIEnv *current_env(UsagiVm *vm);
 bool take_exception(JNIEnv *env) noexcept;
 
 UsagiObject *make_object_handle(const std::shared_ptr<jnivm::VM> &vm,
-                                JNIEnv *env, jobject local_ref,
-                                UsagiObjectKind kind);
+                                JNIEnv *env, jobject ref,
+                                UsagiObjectKind expected_kind);
 
 struct LocalRefGuard {
   JNIEnv *env;
